@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { api, type ScenarioSummary } from '$lib/api';
+	import { api, type ScenarioSummary, type StatusResponse } from '$lib/api';
 
 	let scenarios = $state<ScenarioSummary[]>([]);
+	let status = $state<StatusResponse | null>(null);
 	let error = $state('');
 	let actingOn = $state('');
 	let showForm = $state(false);
@@ -14,7 +15,7 @@
 
 	async function refresh() {
 		try {
-			scenarios = await api.listScenarios();
+			[scenarios, status] = await Promise.all([api.listScenarios(), api.status()]);
 		} catch (e) {
 			error = (e as Error).message;
 		}
@@ -135,6 +136,7 @@
 			<thead>
 				<tr>
 					<th>Name</th>
+					{#if status?.ai_enabled}<th>Mode</th>{/if}
 					<th>URL</th>
 					<th>Steps</th>
 					<th>Baseline</th>
@@ -145,7 +147,25 @@
 			<tbody>
 				{#each scenarios as s (s.name)}
 					<tr>
-						<td><a href="/scenarios/{s.name}"><code>{s.name}</code></a></td>
+						<td>
+							<a href="/scenarios/{s.name}"><code>{s.name}</code></a>
+							{#if s.tags && s.tags.length > 0}
+								<div style="margin-top: 4px;">
+									{#each s.tags as tag}
+										<span class="badge small neutral" style="margin-right:4px;">@{tag}</span>
+									{/each}
+								</div>
+							{/if}
+						</td>
+						{#if status?.ai_enabled}
+							<td>
+								{#if s.needs_ai}
+									<span class="badge small" style="background:#1e3a4a;color:#79c0ff">🤖 AI</span>
+								{:else}
+									<span class="badge small neutral">🔍 basic</span>
+								{/if}
+							</td>
+						{/if}
 						<td class="truncate">{s.url}</td>
 						<td>{s.steps}</td>
 						<td>{s.has_baseline ? '✓' : '—'}</td>

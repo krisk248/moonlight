@@ -7,7 +7,9 @@
 package recorder
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -16,12 +18,17 @@ import (
 	"github.com/krisk248/moonlight/internal/scenario"
 )
 
+// PlaywrightVersion pins npx's Playwright to the same release Playwright-Go
+// v0.5700.1 tracks. This avoids a third Chromium being downloaded.
+const PlaywrightVersion = "1.57.0"
+
 // Options for a recording session.
 type Options struct {
 	URL          string
 	ScenarioName string
 	Viewport     scenario.Viewport
 	OutputPath   string // where to write the .yaml
+	OnLog        func(string) // optional — receives lines of npx stdout/stderr live
 }
 
 // Record launches `npx playwright codegen` (which opens a Chromium window on
@@ -34,6 +41,10 @@ func Record(opts Options) (*scenario.Scenario, error) {
 	if opts.Viewport.Width == 0 {
 		opts.Viewport = scenario.Viewport{Width: 1280, Height: 720}
 	}
+	log := opts.OnLog
+	if log == nil {
+		log = func(string) {}
+	}
 
 	tmpFile, err := os.CreateTemp("", "moonlight-codegen-*.py")
 	if err != nil {
@@ -42,20 +53,34 @@ func Record(opts Options) (*scenario.Scenario, error) {
 	tmpFile.Close()
 	defer os.Remove(tmpFile.Name())
 
+	// `playwright@VER` pins the JS package to the same release Playwright-Go
+	// uses, so npx doesn't yank a different Chromium version into the cache.
 	args := []string{
 		"--yes",
-		"playwright",
+		"playwright@" + PlaywrightVersion,
 		"codegen",
 		"--target", "python-async",
 		"--output", tmpFile.Name(),
 		fmt.Sprintf("--viewport-size=%d,%d", opts.Viewport.Width, opts.Viewport.Height),
 		opts.URL,
 	}
+
+	// Capture stderr so a useful message surfaces when codegen fails.
+	var stderrBuf bytes.Buffer
 	cmd := exec.Command("npx", args...)
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
+	log(fmt.Sprintf("[record] $ npx %s", strings.Join(args, " ")))
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("codegen failed: %w", err)
+		msg := strings.TrimSpace(stderrBuf.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		// Trim very long stderr to the first ~600 chars so the UI stays readable.
+		if len(msg) > 600 {
+			msg = msg[:600] + "…"
+		}
+		return nil, fmt.Errorf("codegen failed:\n%s", msg)
 	}
 
 	source, err := os.ReadFile(tmpFile.Name())
@@ -85,17 +110,19 @@ func Record(opts Options) (*scenario.Scenario, error) {
 // ---------- parser ---------------------------------------------------------
 
 var (
-	rGoto         = regexp.MustCompile(`await page\.goto\("([^"]+)"\)`)
-	rRoleClick    = regexp.MustCompile(`await page\.get_by_role\("([^"]+)"(?:,\s*name="([^"]+)")?\)\.click\(\)`)
-	rRoleFill     = regexp.MustCompile(`await page\.get_by_role\("([^"]+)"(?:,\s*name="([^"]+)")?\)\.fill\("([^"]*)"\)`)
-	rRolePress    = regexp.MustCompile(`await page\.get_by_role\("([^"]+)"(?:,\s*name="([^"]+)")?\)\.press\("([^"]+)"\)`)
-	rLabelFill    = regexp.MustCompile(`await page\.get_by_label\("([^"]+)"\)\.fill\("([^"]*)"\)`)
-	rLabelClick   = regexp.MustCompile(`await page\.get_by_label\("([^"]+)"\)\.click\(\)`)
-	rTextClick    = regexp.MustCompile(`await page\.get_by_text\("([^"]+)"\)\.click\(\)`)
-	rPlaceFill    = regexp.MustCompile(`await page\.get_by_placeholder\("([^"]+)"\)\.fill\("([^"]*)"\)`)
-	rLocClick     = regexp.MustCompile(`await page\.locator\("([^"]+)"\)\.click\(\)`)
-	rLocFill      = regexp.MustCompile(`await page\.locator\("([^"]+)"\)\.fill\("([^"]*)"\)`)
-	rLocSelect    = regexp.MustCompile(`await page\.locator\("([^"]+)"\)\.select_option\("([^"]+)"\)`)
+	rGoto       = regexp.MustCompile(`await page\.goto\("([^"]+)"\)`)
+	rRoleClick  = regexp.MustCompile(`await page\.get_by_role\("([^"]+)"(?:,\s*name="([^"]+)")?\)\.click\(\)`)
+	rRoleFill   = regexp.MustCompile(`await page\.get_by_role\("([^"]+)"(?:,\s*name="([^"]+)")?\)\.fill\("([^"]*)"\)`)
+	rRolePress  = regexp.MustCompile(`await page\.get_by_role\("([^"]+)"(?:,\s*name="([^"]+)")?\)\.press\("([^"]+)"\)`)
+	rLabelFill  = regexp.MustCompile(`await page\.get_by_label\("([^"]+)"\)\.fill\("([^"]*)"\)`)
+	rLabelClick = regexp.MustCompile(`await page\.get_by_label\("([^"]+)"\)\.click\(\)`)
+	rTextClick  = regexp.MustCompile(`await page\.get_by_text\("([^"]+)"\)\.click\(\)`)
+	rPlaceFill  = regexp.MustCompile(`await page\.get_by_placeholder\("([^"]+)"\)\.fill\("([^"]*)"\)`)
+	rLocClick   = regexp.MustCompile(`await page\.locator\("([^"]+)"\)\.click\(\)`)
+	rLocFill    = regexp.MustCompile(`await page\.locator\("([^"]+)"\)\.fill\("([^"]*)"\)`)
+	rLocSelect  = regexp.MustCompile(`await page\.locator\("([^"]+)"\)\.select_option\("([^"]+)"\)`)
+	// File upload: page.locator("input[type=file]").set_input_files("/path/file")
+	rLocUpload = regexp.MustCompile(`await page\.locator\("([^"]+)"\)\.set_input_files\("([^"]+)"\)`)
 )
 
 func parseCodegen(source string) (baseURL string, steps []scenario.Step) {
@@ -114,6 +141,13 @@ func parseCodegen(source string) (baseURL string, steps []scenario.Step) {
 			},
 		})
 	}
+	// addWait drops an explicit "wait for the page to settle" step in
+	// between navigation-y actions. This is the main remedy for the
+	// "timeout 30000ms exceeded" failures users hit when an SPA needs a
+	// moment to render the next element they clicked.
+	addWait := func() {
+		steps = append(steps, scenario.Step{Action: "wait_for_networkidle"})
+	}
 
 	for _, line := range strings.Split(source, "\n") {
 		line = strings.TrimSpace(line)
@@ -129,11 +163,13 @@ func parseCodegen(source string) (baseURL string, steps []scenario.Step) {
 			} else {
 				steps = append(steps, scenario.Step{Action: "goto", URL: url})
 			}
+			addWait()
 			addScreenshot("after-goto")
 			continue
 		}
 		if m := rRolePress.FindStringSubmatch(line); m != nil {
 			steps = append(steps, scenario.Step{Action: "press", Role: m[1], RoleName: m[2], Key: m[3]})
+			addWait()
 			addScreenshot("after-press")
 			continue
 		}
@@ -143,6 +179,7 @@ func parseCodegen(source string) (baseURL string, steps []scenario.Step) {
 		}
 		if m := rRoleClick.FindStringSubmatch(line); m != nil {
 			steps = append(steps, scenario.Step{Action: "click", Role: m[1], RoleName: m[2]})
+			addWait()
 			addScreenshot("after-click")
 			continue
 		}
@@ -152,16 +189,22 @@ func parseCodegen(source string) (baseURL string, steps []scenario.Step) {
 		}
 		if m := rLabelClick.FindStringSubmatch(line); m != nil {
 			steps = append(steps, scenario.Step{Action: "click", Label: m[1]})
+			addWait()
 			addScreenshot("after-click")
 			continue
 		}
 		if m := rTextClick.FindStringSubmatch(line); m != nil {
 			steps = append(steps, scenario.Step{Action: "click", Text: m[1]})
+			addWait()
 			addScreenshot("after-click")
 			continue
 		}
 		if m := rPlaceFill.FindStringSubmatch(line); m != nil {
 			steps = append(steps, scenario.Step{Action: "fill", Selector: fmt.Sprintf(`[placeholder="%s"]`, m[1]), Value: m[2]})
+			continue
+		}
+		if m := rLocUpload.FindStringSubmatch(line); m != nil {
+			steps = append(steps, scenario.Step{Action: "upload_file", Selector: m[1], Path: m[2]})
 			continue
 		}
 		if m := rLocFill.FindStringSubmatch(line); m != nil {
@@ -170,6 +213,7 @@ func parseCodegen(source string) (baseURL string, steps []scenario.Step) {
 		}
 		if m := rLocClick.FindStringSubmatch(line); m != nil {
 			steps = append(steps, scenario.Step{Action: "click", Selector: m[1]})
+			addWait()
 			addScreenshot("after-click")
 			continue
 		}

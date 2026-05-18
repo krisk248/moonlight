@@ -7,7 +7,18 @@ export interface StatusResponse {
 	build_date: string;
 	version: string;
 	is_source_build: boolean;
+	ai_enabled: boolean;
 	ollama_up: boolean;
+	ollama_model: string;
+	ollama_model_present: boolean;
+	revocation_active: boolean;
+}
+
+export interface SettingsResponse {
+	ai_enabled: boolean;
+	ollama_host: string;
+	ollama_model: string;
+	default_timeout_ms: number;
 }
 
 export interface ScenarioSummary {
@@ -16,6 +27,8 @@ export interface ScenarioSummary {
 	steps: number;
 	has_baseline: boolean;
 	has_storage: boolean;
+	needs_ai: boolean;
+	tags: string[];
 }
 
 export interface Scenario {
@@ -137,7 +150,14 @@ export const api = {
 		fetch(`/api/scenarios/${name}`, { method: 'DELETE' }).then((r) => r.ok),
 	listRuns: () => fetchJSON<RunSummary[]>('/api/runs'),
 	getRun: (id: string) => fetchJSON<RunResult>(`/api/runs/${id}`),
-	getJob: (id: string) => fetchJSON<Job>(`/api/jobs/${id}`)
+	getJob: (id: string) => fetchJSON<Job>(`/api/jobs/${id}`),
+	getSettings: () => fetchJSON<SettingsResponse>('/api/settings'),
+	updateSettings: (s: SettingsResponse) =>
+		fetchJSON<SettingsResponse>('/api/settings', {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(s)
+		})
 };
 
 // Convert an absolute server path returned by the API into a /files/* URL the

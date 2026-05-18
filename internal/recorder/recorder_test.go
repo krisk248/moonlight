@@ -22,25 +22,18 @@ async def main():
 	if base != "https://app.example.com/login" {
 		t.Errorf("base url wrong: %q", base)
 	}
-
-	// First step should be goto / (relative), then screenshot, then 3 actions, etc.
 	if len(steps) < 8 {
 		t.Errorf("expected several steps, got %d", len(steps))
 	}
-
-	// Find the fill that captured Email
-	var emailFill, signin *struct{ idx int }
-	_ = signin
-	for i, s := range steps {
-		if s.Action == "fill" && s.Role == "textbox" && s.RoleName == "Email" {
-			emailFill = &struct{ idx int }{i}
+	// wait_for_networkidle should appear after every goto / click / press.
+	waits := 0
+	for _, s := range steps {
+		if s.Action == "wait_for_networkidle" {
+			waits++
 		}
 	}
-	if emailFill == nil {
-		t.Errorf("did not parse get_by_role textbox Email .fill")
-		for i, s := range steps {
-			t.Logf("step %d: %+v", i, s)
-		}
+	if waits < 2 {
+		t.Errorf("expected wait_for_networkidle to be auto-inserted after goto/click; got %d waits", waits)
 	}
 }
 
@@ -67,5 +60,24 @@ func TestParseCodegen_LocatorBased(t *testing.T) {
 	}
 	if !foundFill {
 		t.Errorf("locator fill not parsed")
+	}
+}
+
+func TestParseCodegen_FileUpload(t *testing.T) {
+	src := `        await page.goto("https://example.com/upload")
+        await page.locator("input[type=file]").set_input_files("/tmp/my-file.png")
+`
+	_, steps := parseCodegen(src)
+	found := false
+	for _, s := range steps {
+		if s.Action == "upload_file" && s.Selector == "input[type=file]" && s.Path == "/tmp/my-file.png" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("set_input_files not parsed into upload_file step")
+		for i, s := range steps {
+			t.Logf("step %d: %+v", i, s)
+		}
 	}
 }

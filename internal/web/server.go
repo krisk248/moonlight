@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"github.com/krisk248/moonlight/internal/recorder"
 	"github.com/krisk248/moonlight/internal/runner"
 	"github.com/krisk248/moonlight/internal/scenario"
+	"github.com/krisk248/moonlight/internal/settings"
 	"github.com/krisk248/moonlight/internal/vision"
 )
 
@@ -35,21 +37,29 @@ type Config struct {
 }
 
 type Server struct {
-	cfg    Config
-	jobs   *jobRegistry
-	vision *vision.Client
-	static fs.FS
+	cfg      Config
+	jobs     *jobRegistry
+	vision   *vision.Client
+	static   fs.FS
+	settings *settings.Store
 }
 
 func New(cfg Config, static fs.FS) *Server {
 	for _, d := range []string{cfg.ScenarioDir, cfg.BaselineDir, cfg.RunsDir} {
 		_ = os.MkdirAll(d, 0o755)
 	}
+	store, _ := settings.NewStore(cfg.ProjectRoot)
+	if store == nil {
+		// Fall back to in-memory defaults if disk write fails — better than crash.
+		store, _ = settings.NewStore(os.TempDir())
+	}
+	cur := store.Get()
 	return &Server{
-		cfg:    cfg,
-		jobs:   newJobRegistry(),
-		vision: vision.NewClient(cfg.OllamaHost, cfg.OllamaModel, 120*time.Second),
-		static: static,
+		cfg:      cfg,
+		jobs:     newJobRegistry(),
+		vision:   vision.NewClient(cur.OllamaHost, cur.OllamaModel, 120*time.Second),
+		static:   static,
+		settings: store,
 	}
 }
 
@@ -60,6 +70,8 @@ func (s *Server) Handler() http.Handler {
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/status", s.handleStatus)
+		r.Get("/settings", s.handleGetSettings)
+		r.Put("/settings", s.handlePutSettings)
 		r.Get("/scenarios", s.handleListScenarios)
 		r.Post("/scenarios", s.handleCreateScenario)
 		r.Post("/scenarios/record", s.handleRecord)
@@ -86,19 +98,64 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	type out struct {
-		BuildID       string `json:"build_id"`
-		BuildDate     string `json:"build_date"`
-		Version       string `json:"version"`
-		IsSourceBuild bool   `json:"is_source_build"`
-		OllamaUp      bool   `json:"ollama_up"`
+		BuildID            string `json:"build_id"`
+		BuildDate          string `json:"build_date"`
+		Version            string `json:"version"`
+		IsSourceBuild      bool   `json:"is_source_build"`
+		AIEnabled          bool   `json:"ai_enabled"`
+		OllamaUp           bool   `json:"ollama_up"`
+		OllamaModel        string `json:"ollama_model"`
+		OllamaModelPresent bool   `json:"ollama_model_present"`
+		RevocationActive   bool   `json:"revocation_active"`
+	}
+	cur := s.settings.Get()
+	// Only probe Ollama when AI is enabled — saves an HTTP call per dashboard refresh otherwise.
+	ollamaUp := false
+	modelPresent := false
+	if cur.AIEnabled {
+		ollamaUp = s.vision.Ping()
+		if ollamaUp {
+			modelPresent = s.vision.IsModelLoaded(cur.OllamaModel)
+		}
 	}
 	writeJSON(w, out{
-		BuildID:       buildinfo.BuildID,
-		BuildDate:     buildinfo.BuildDate,
-		Version:       buildinfo.Version,
-		IsSourceBuild: buildinfo.IsSourceBuild(),
-		OllamaUp:      s.vision.Ping(),
+		BuildID:            buildinfo.BuildID,
+		BuildDate:          buildinfo.BuildDate,
+		Version:            buildinfo.Version,
+		IsSourceBuild:      buildinfo.IsSourceBuild(),
+		AIEnabled:          cur.AIEnabled,
+		OllamaUp:           ollamaUp,
+		OllamaModel:        cur.OllamaModel,
+		OllamaModelPresent: modelPresent,
+		RevocationActive:   buildinfo.RevocationURL != "",
 	})
+}
+
+func (s *Server) handleGetSettings(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, s.settings.Get())
+}
+
+func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
+	var body settings.Settings
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	// Reasonable defaults if a field is left blank.
+	defaults := settings.Default()
+	if body.OllamaHost == "" {
+		body.OllamaHost = defaults.OllamaHost
+	}
+	if body.OllamaModel == "" {
+		body.OllamaModel = defaults.OllamaModel
+	}
+	if err := s.settings.Set(body); err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	// Rebuild the vision client to honour new host/model immediately.
+	s.vision = vision.NewClient(body.OllamaHost, body.OllamaModel, 120*time.Second)
+	writeJSON(w, body)
 }
 
 func (s *Server) handleListScenarios(w http.ResponseWriter, _ *http.Request) {
@@ -109,11 +166,13 @@ func (s *Server) handleListScenarios(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	type scenSummary struct {
-		Name        string `json:"name"`
-		URL         string `json:"url"`
-		Steps       int    `json:"steps"`
-		HasBaseline bool   `json:"has_baseline"`
-		HasStorage  bool   `json:"has_storage"`
+		Name        string   `json:"name"`
+		URL         string   `json:"url"`
+		Steps       int      `json:"steps"`
+		HasBaseline bool     `json:"has_baseline"`
+		HasStorage  bool     `json:"has_storage"`
+		NeedsAI     bool     `json:"needs_ai"`
+		Tags        []string `json:"tags"`
 	}
 	out := make([]scenSummary, 0, len(list))
 	for _, sc := range list {
@@ -127,12 +186,18 @@ func (s *Server) handleListScenarios(w http.ResponseWriter, _ *http.Request) {
 				}
 			}
 		}
+		tags := sc.Tags
+		if tags == nil {
+			tags = []string{}
+		}
 		out = append(out, scenSummary{
 			Name:        sc.Name,
 			URL:         sc.URL,
 			Steps:       len(sc.Steps),
 			HasBaseline: hasBaseline,
 			HasStorage:  sc.StorageState != "",
+			NeedsAI:     sc.NeedsAI(),
+			Tags:        tags,
 		})
 	}
 	writeJSON(w, out)
@@ -222,6 +287,7 @@ func (s *Server) handleRecord(w http.ResponseWriter, r *http.Request) {
 			ScenarioName: body.Name,
 			Viewport:     scenario.Viewport{Width: 1280, Height: 720},
 			OutputPath:   out,
+			OnLog:        func(line string) { s.jobs.log(job.ID, line) },
 		})
 		if err != nil {
 			s.jobs.finish(job.ID, nil, err)
@@ -261,18 +327,29 @@ func (s *Server) kickoffRun(w http.ResponseWriter, r *http.Request, mode runner.
 	}
 	job := s.jobs.create(string(mode), name)
 	go func() {
+		cur := s.settings.Get()
+		slog.Info("job.start", "id", job.ID, "kind", string(mode), "scenario", name, "ai_enabled", cur.AIEnabled, "default_timeout_ms", cur.DefaultTimeoutMS)
 		opts := runner.Opts{
-			ProjectRoot: s.cfg.ProjectRoot,
-			BaselineDir: s.cfg.BaselineDir,
-			RunsDir:     s.cfg.RunsDir,
-			Headless:    s.cfg.Headless,
-			OnLog:       func(line string) { s.jobs.log(job.ID, line) },
+			ProjectRoot:      s.cfg.ProjectRoot,
+			BaselineDir:      s.cfg.BaselineDir,
+			RunsDir:          s.cfg.RunsDir,
+			Headless:         s.cfg.Headless,
+			DefaultTimeoutMS: cur.DefaultTimeoutMS,
+			OnLog: func(line string) {
+				s.jobs.log(job.ID, line)
+				slog.Debug("job.log", "id", job.ID, "line", line)
+			},
 		}
-		if mode == runner.ModeRun {
+		if mode == runner.ModeRun && cur.AIEnabled {
 			opts.Vision = s.vision
 		}
 		result, runErr := runner.Run(sc, mode, opts)
 		s.jobs.finish(job.ID, result, runErr)
+		passed := false
+		if result != nil {
+			passed = result.Passed
+		}
+		slog.Info("job.finish", "id", job.ID, "kind", string(mode), "scenario", name, "passed", passed, "error", errOrEmpty(runErr))
 	}()
 	writeJSON(w, job)
 }
@@ -371,9 +448,17 @@ func writeJSON(w http.ResponseWriter, v any) {
 }
 
 func writeError(w http.ResponseWriter, code int, err error) {
+	slog.Warn("http.error", "code", code, "err", err.Error())
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+}
+
+func errOrEmpty(e error) string {
+	if e == nil {
+		return ""
+	}
+	return e.Error()
 }
 
 // spaHandler serves the embedded Svelte build. Unknown paths fall back to

@@ -32,3 +32,4 @@ auth-state/*
 .serena/
 *.swp
 .DS_Store
+settings.json

@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -145,12 +146,14 @@ func kill() {
 func Enforce() {
 	// 1. Sentinel from prior kill.
 	if _, err := os.Stat(sentinelPath()); err == nil {
+		slog.Warn("lifecycle.sentinel_present_exit")
 		fmt.Println(GenericMessage)
 		os.Exit(2)
 	}
 
 	// 2. Source builds: dev mode, no restriction.
 	if buildinfo.IsSourceBuild() {
+		slog.Debug("lifecycle.source_build_skip")
 		return
 	}
 
@@ -160,15 +163,18 @@ func Enforce() {
 
 	spec := fetchSpec()
 	if spec != nil {
+		slog.Info("lifecycle.spec_fetched", "last_day", spec.LastDay)
 		s.CachedSpec = spec
 		s.LastSuccess = now.Format(time.RFC3339)
 		s.FirstUnreachable = ""
 		saveState(s)
 		if isPast(spec.LastDay) {
+			slog.Error("lifecycle.kill_triggered", "reason", "last_day_past", "last_day", spec.LastDay)
 			kill()
 		}
 		return
 	}
+	slog.Warn("lifecycle.fetch_failed_using_cache_or_grace")
 
 	// 4. Fetch failed → use cache if recent enough.
 	var lastSuccess time.Time

@@ -5,13 +5,21 @@ Automated regression testing for web apps, written in Go.
 Drives Chromium via Playwright, captures screenshots, and verifies each step
 with either:
 
-- **Basic mode** — deterministic DOM assertions (text, visibility, URL). No
-  AI involved. Runs without Ollama.
-- **AI mode** — augments DOM assertions with a local SmolVLM2-2.2B vision
-  model that answers yes/no questions about screenshots. Requires Ollama.
+- **Basic mode** (default) — deterministic DOM assertions (text, visibility,
+  URL). No AI involved. Runs without Ollama. Most testers should stay here.
+- **AI mode** (opt-in via Settings) — augments DOM assertions with a local
+  SmolVLM2-2.2B vision model that answers yes/no questions about screenshots.
+  Requires Ollama.
 
 The mode is decided **per scenario** by whether the YAML carries `ai_check:`
-blocks. A scenario with only `dom_check:` blocks never contacts Ollama.
+blocks AND the AI toggle is on in Settings. A scenario with only `dom_check:`
+blocks never contacts Ollama.
+
+> **About this codebase:** Moonlight was vibecoded — built through iterative
+> conversation with a coding assistant, refined run by run as real testers
+> hit real failures. The architecture pivots in the git history are
+> intentional and visible. Use the code as-is or fork and steer it toward
+> your own house style.
 
 ---
 

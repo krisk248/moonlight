@@ -70,13 +70,14 @@ type RunResult struct {
 
 // Opts groups dependencies passed into Run.
 type Opts struct {
-	ProjectRoot   string
-	BaselineDir   string
-	RunsDir       string
-	Vision        *vision.Client // may be nil; consulted only if scenario needs AI
-	Headless      bool
-	DiffTolerance uint8          // 0..255 channel-delta threshold per pixel; 12 is a reasonable default
-	OnLog         func(string)
+	ProjectRoot       string
+	BaselineDir       string
+	RunsDir           string
+	Vision            *vision.Client // may be nil; consulted only if scenario needs AI
+	Headless          bool
+	DiffTolerance     uint8 // 0..255 channel-delta threshold per pixel; 12 is a reasonable default
+	DefaultTimeoutMS  int   // global Playwright timeout per action; 0 → 15000
+	OnLog             func(string)
 }
 
 // VisionClient narrows the vision.Client API to what the runner needs so
@@ -135,11 +136,15 @@ func Run(s *scenario.Scenario, mode Mode, opts Opts) (*RunResult, error) {
 		storageStatePath = filepath.Join(opts.ProjectRoot, s.StorageState)
 	}
 
+	timeoutMS := opts.DefaultTimeoutMS
+	if timeoutMS <= 0 {
+		timeoutMS = 15000
+	}
 	br, err := browser.New(browser.Opts{
 		BaseURL:          s.URL,
 		Viewport:         s.Viewport,
 		Headless:         headless,
-		DefaultTimeoutMS: 15000,
+		DefaultTimeoutMS: timeoutMS,
 		StorageStatePath: storageStatePath,
 	})
 	if err != nil {
@@ -158,6 +163,11 @@ func Run(s *scenario.Scenario, mode Mode, opts Opts) (*RunResult, error) {
 
 		res := StepResult{Index: idx, Action: step.Action, Name: name, Passed: true}
 
+		// Per-step timeout override — restored after the action.
+		if step.TimeoutMS > 0 {
+			br.SetStepTimeout(step.TimeoutMS)
+		}
+
 		var stepErr error
 		switch step.Action {
 		case "goto":
@@ -174,6 +184,12 @@ func Run(s *scenario.Scenario, mode Mode, opts Opts) (*RunResult, error) {
 			stepErr = br.WaitFor(step)
 		case "wait_ms":
 			br.WaitMS(step.MS)
+		case "wait_for_networkidle":
+			stepErr = br.WaitForNetworkidle()
+		case "upload_file":
+			stepErr = br.Upload(step)
+		case "download_file":
+			stepErr = br.Download(step)
 		case "scroll":
 			stepErr = br.Scroll(step.Y)
 		case "screenshot":
@@ -244,6 +260,11 @@ func Run(s *scenario.Scenario, mode Mode, opts Opts) (*RunResult, error) {
 		if stepErr != nil {
 			res.Passed = false
 			res.Error = stepErr.Error()
+		}
+
+		// Restore the global timeout for the next step.
+		if step.TimeoutMS > 0 {
+			br.ResetTimeout(timeoutMS)
 		}
 
 		cons, net, errs := br.SnapshotEvents()

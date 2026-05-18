@@ -25,7 +25,9 @@
 		passed: runs.filter((r) => r.passed).length,
 		failed: runs.filter((r) => !r.passed).length,
 		scenarios: scenarios.length,
-		withBaseline: scenarios.filter((s) => s.has_baseline).length
+		withBaseline: scenarios.filter((s) => s.has_baseline).length,
+		aiScenarios: scenarios.filter((s) => s.needs_ai).length,
+		basicScenarios: scenarios.filter((s) => !s.needs_ai).length
 	});
 
 	const latest = $derived(runs.slice(0, 5));
@@ -60,11 +62,38 @@
 				<span class="label">Build</span>
 				<span class="value">{status.build_id}</span>
 			</div>
-			<div class="status-pill {status.ollama_up ? 'ok' : 'fail'}">
-				<span class="label">Ollama</span>
-				<span class="value">{status.ollama_up ? 'reachable' : 'unreachable'}</span>
+			<div class="status-pill {status.revocation_active ? 'ok' : 'fail'}">
+				<span class="label">Kill switch</span>
+				<span class="value">
+					{status.revocation_active ? 'enforcing' : 'inactive (source build)'}
+				</span>
 			</div>
 		</div>
+		{#if status.ai_enabled}
+			<div class="grid-3" style="margin-top: 12px;">
+				<div class="status-pill {status.ollama_up ? 'ok' : 'fail'}">
+					<span class="label">Ollama server</span>
+					<span class="value">{status.ollama_up ? 'reachable' : 'unreachable'}</span>
+				</div>
+				<div class="status-pill {status.ollama_model_present ? 'ok' : 'fail'}">
+					<span class="label">Vision model</span>
+					<span class="value">
+						{status.ollama_model}<br />
+						<span class="muted" style="font-size: 11px;">
+							{status.ollama_model_present
+								? 'pulled & ready'
+								: status.ollama_up
+									? 'NOT pulled'
+									: 'Ollama unreachable'}
+						</span>
+					</span>
+				</div>
+				<div class="status-pill ok">
+					<span class="label">Mode</span>
+					<span class="value">AI-augmented (toggle off in Settings)</span>
+				</div>
+			</div>
+		{/if}
 	{:else}
 		<p class="muted">Loading…</p>
 	{/if}
@@ -77,7 +106,14 @@
 	<div class="grid-3">
 		<div class="status-pill ok">
 			<span class="label">Scenarios</span>
-			<span class="value">{stats.scenarios} ({stats.withBaseline} with baseline)</span>
+			<span class="value">
+				{stats.scenarios} total ({stats.withBaseline} with baseline)
+				{#if status?.ai_enabled}
+					<br /><span class="muted" style="font-size: 11px;">
+						🤖 {stats.aiScenarios} AI · 🔍 {stats.basicScenarios} basic
+					</span>
+				{/if}
+			</span>
 		</div>
 		<div class="status-pill {stats.failed > 0 ? 'fail' : 'ok'}">
 			<span class="label">Recent runs</span>

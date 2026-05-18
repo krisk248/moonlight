@@ -13,6 +13,7 @@ import (
 	"time"
 )
 
+
 const (
 	functionalPrompt = "You are a QA test assistant. Look at the screenshot of a web application. " +
 		"Answer the following question with 'YES' or 'NO' as the FIRST word, then a " +
@@ -98,6 +99,38 @@ func (c *Client) Ping() bool {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode == 200
+}
+
+// IsModelLoaded returns true if the given model name (or its base prefix
+// before ":") appears in Ollama's /api/tags listing.
+func (c *Client) IsModelLoaded(name string) bool {
+	if name == "" {
+		return false
+	}
+	req, _ := http.NewRequest("GET", c.host+"/api/tags", nil)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return false
+	}
+	var body struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return false
+	}
+	base := strings.SplitN(name, ":", 2)[0]
+	for _, m := range body.Models {
+		if m.Name == name || strings.HasPrefix(m.Name, base) {
+			return true
+		}
+	}
+	return false
 }
 
 // Verdict is the parsed outcome of a yes/no AI check.

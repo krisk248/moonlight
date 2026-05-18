@@ -15,6 +15,9 @@ import (
 	"github.com/krisk248/moonlight/internal/scenario"
 )
 
+// (imports above are intentionally kept compact; filepath is now used by Download)
+
+
 type Browser struct {
 	pw       *playwright.Playwright
 	browser  playwright.Browser
@@ -244,6 +247,69 @@ func (b *Browser) WaitFor(s scenario.Step) error {
 
 func (b *Browser) WaitMS(ms int) {
 	time.Sleep(time.Duration(ms) * time.Millisecond)
+}
+
+// WaitForNetworkidle blocks until the page has had no network activity for
+// 500ms — the standard "page is done loading" heuristic.
+func (b *Browser) WaitForNetworkidle() error {
+	return b.page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+		State: playwright.LoadStateNetworkidle,
+	})
+}
+
+// SetStepTimeout temporarily overrides the per-step Playwright timeout for
+// the upcoming action. Restored to the context's default at the next call.
+func (b *Browser) SetStepTimeout(ms int) {
+	if ms <= 0 {
+		return
+	}
+	b.context.SetDefaultTimeout(float64(ms))
+}
+
+// ResetTimeout restores the global default timeout the runner gave us.
+func (b *Browser) ResetTimeout(globalMS int) {
+	b.context.SetDefaultTimeout(float64(globalMS))
+}
+
+// Upload sets an <input type=file> to a local path on disk.
+func (b *Browser) Upload(s scenario.Step) error {
+	loc, err := b.locator(s)
+	if err != nil {
+		return err
+	}
+	path := s.Path
+	if path == "" {
+		return fmt.Errorf("upload_file step missing 'path'")
+	}
+	return loc.SetInputFiles(path)
+}
+
+// Download registers a download listener, clicks the trigger, waits for the
+// download to complete, then saves it to disk at the given path.
+func (b *Browser) Download(s scenario.Step) error {
+	loc, err := b.locator(s)
+	if err != nil {
+		return err
+	}
+	saveTo := s.SaveTo
+	if saveTo == "" {
+		saveTo = s.Path
+	}
+	if saveTo == "" {
+		return fmt.Errorf("download_file step missing 'save_to' (or 'path')")
+	}
+
+	// page.ExpectDownload runs the trigger inside a closure that arms the listener.
+	dl, err := b.page.ExpectDownload(func() error {
+		return loc.Click()
+	})
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(saveTo), 0o755); err != nil {
+		return err
+	}
+	return dl.SaveAs(saveTo)
 }
 
 func (b *Browser) Scroll(y int) error {

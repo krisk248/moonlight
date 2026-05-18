@@ -6,7 +6,9 @@
 	const tabs = [
 		{ href: '/', label: 'Dashboard' },
 		{ href: '/scenarios', label: 'Scenarios' },
-		{ href: '/history', label: 'History' }
+		{ href: '/suites', label: 'Suites' },
+		{ href: '/history', label: 'History' },
+		{ href: '/settings', label: 'Settings' }
 	];
 	let active = $derived(page.url.pathname);
 </script>
@@ -30,10 +32,7 @@
 </main>
 
 <footer class="site-footer">
-	Made by <strong>Kannan</strong> ·
-	<a href="https://github.com/krisk248/moonlight" target="_blank" rel="noopener">
-		github.com/krisk248/moonlight
-	</a>
+	Made by <strong>Kannan</strong>
 </footer>
 
 <style>

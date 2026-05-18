@@ -18,56 +18,64 @@ import (
 
 // Scenario is a single recorded test flow.
 type Scenario struct {
-	Name         string   `yaml:"name"`
-	URL          string   `yaml:"url"`
-	Viewport     Viewport `yaml:"viewport,omitempty"`
-	Headless     *bool    `yaml:"headless,omitempty"`
-	StorageState string   `yaml:"storage_state,omitempty"`
-	Steps        []Step   `yaml:"steps"`
-	Tags         []string `yaml:"tags,omitempty"`
+	Name         string   `yaml:"name"                    json:"name"`
+	URL          string   `yaml:"url"                     json:"url"`
+	Viewport     Viewport `yaml:"viewport,omitempty"      json:"viewport,omitempty"`
+	Headless     *bool    `yaml:"headless,omitempty"      json:"headless,omitempty"`
+	StorageState string   `yaml:"storage_state,omitempty" json:"storage_state,omitempty"`
+	Steps        []Step   `yaml:"steps"                   json:"steps"`
+	Tags         []string `yaml:"tags,omitempty"          json:"tags,omitempty"`
 }
 
 // Viewport is the browser window size for the run.
 type Viewport struct {
-	Width  int `yaml:"width"`
-	Height int `yaml:"height"`
+	Width  int `yaml:"width"  json:"width"`
+	Height int `yaml:"height" json:"height"`
 }
 
 // Step is one browser action plus optional verifications.
 type Step struct {
-	Action   string    `yaml:"action"`
-	Name     string    `yaml:"name,omitempty"`
-	URL      string    `yaml:"url,omitempty"`
-	Selector string    `yaml:"selector,omitempty"`
-	Role     string    `yaml:"role,omitempty"`
-	RoleName string    `yaml:"role_name,omitempty"`
-	Label    string    `yaml:"label,omitempty"`
-	Text     string    `yaml:"text,omitempty"`
-	Value    string    `yaml:"value,omitempty"`
-	Key      string    `yaml:"key,omitempty"`
-	MS       int       `yaml:"ms,omitempty"`
-	Y        int       `yaml:"y,omitempty"`
-	FullPage bool      `yaml:"full_page,omitempty"`
-	AICheck  *AICheck  `yaml:"ai_check,omitempty"`
-	DOMCheck *DOMCheck `yaml:"dom_check,omitempty"`
+	Action   string    `yaml:"action"              json:"action"`
+	Name     string    `yaml:"name,omitempty"      json:"name,omitempty"`
+	URL      string    `yaml:"url,omitempty"       json:"url,omitempty"`
+	Selector string    `yaml:"selector,omitempty"  json:"selector,omitempty"`
+	Role     string    `yaml:"role,omitempty"      json:"role,omitempty"`
+	RoleName string    `yaml:"role_name,omitempty" json:"role_name,omitempty"`
+	Label    string    `yaml:"label,omitempty"     json:"label,omitempty"`
+	Text     string    `yaml:"text,omitempty"      json:"text,omitempty"`
+	Value    string    `yaml:"value,omitempty"     json:"value,omitempty"`
+	Key      string    `yaml:"key,omitempty"       json:"key,omitempty"`
+	MS       int       `yaml:"ms,omitempty"        json:"ms,omitempty"`
+	Y        int       `yaml:"y,omitempty"         json:"y,omitempty"`
+	FullPage bool      `yaml:"full_page,omitempty" json:"full_page,omitempty"`
+
+	// upload_file / download_file
+	Path   string `yaml:"path,omitempty"    json:"path,omitempty"`    // file to upload (or, for download_file, where to save)
+	SaveTo string `yaml:"save_to,omitempty" json:"save_to,omitempty"` // alias of Path for download_file readability
+
+	// Per-step override of the global timeout (in ms). Use for known-slow pages.
+	TimeoutMS int `yaml:"timeout_ms,omitempty" json:"timeout_ms,omitempty"`
+
+	AICheck  *AICheck  `yaml:"ai_check,omitempty"  json:"ai_check,omitempty"`
+	DOMCheck *DOMCheck `yaml:"dom_check,omitempty" json:"dom_check,omitempty"`
 }
 
 // AICheck is the SmolVLM2 yes/no assertion. Skipped at runtime if Ollama is
 // unreachable, the model isn't loaded, or the scenario was launched in basic
 // mode — failures in this layer never crash a deterministic test.
 type AICheck struct {
-	Prompt string `yaml:"prompt"`
-	Expect string `yaml:"expect"` // "yes" / "no" / "true" / "false"
+	Prompt string `yaml:"prompt" json:"prompt"`
+	Expect string `yaml:"expect" json:"expect"`
 }
 
 // DOMCheck is a set of deterministic assertions. All listed conditions must
 // be true for the check to PASS. Any single failure marks the check failed.
 type DOMCheck struct {
-	ContainsText    []string `yaml:"contains_text,omitempty"`    // page body must contain every string
-	SelectorVisible string   `yaml:"selector_visible,omitempty"` // this CSS selector must resolve to a visible element
-	SelectorHidden  string   `yaml:"selector_hidden,omitempty"`  // this selector must NOT be visible (may exist hidden / not exist)
-	URLContains     string   `yaml:"url_contains,omitempty"`     // page URL must contain this substring
-	URLMatches      string   `yaml:"url_matches,omitempty"`      // page URL must match this regex
+	ContainsText    []string `yaml:"contains_text,omitempty"    json:"contains_text,omitempty"`
+	SelectorVisible string   `yaml:"selector_visible,omitempty" json:"selector_visible,omitempty"`
+	SelectorHidden  string   `yaml:"selector_hidden,omitempty"  json:"selector_hidden,omitempty"`
+	URLContains     string   `yaml:"url_contains,omitempty"     json:"url_contains,omitempty"`
+	URLMatches      string   `yaml:"url_matches,omitempty"      json:"url_matches,omitempty"`
 }
 
 // NeedsAI returns true if any step in the scenario carries an AICheck.
