@@ -1,5 +1,5 @@
-# Moonlight binary build (Windows 11) — uses Nuitka.
-# Output: dist\moonlight-windows-<date>\ folder ready to zip and distribute.
+# Moonlight binary build (Windows amd64) — uses Nuitka.
+# Output: dist\moonlight-windows-amd64-<date>\
 [CmdletBinding()]
 param()
 
@@ -8,18 +8,12 @@ $RepoRoot = (Resolve-Path "$PSScriptRoot\..\..").Path
 Set-Location $RepoRoot
 
 # ---------- stamp build metadata ----------
-# Required env vars for centralized revocation:
-#   $env:MOONLIGHT_REVOCATION_REPO   e.g. "krisk248/moonlight-revocations"
-#   $env:MOONLIGHT_REVOCATION_PAT    fine-grained read-only PAT for that repo
-# Optional: $env:MOONLIGHT_REVOCATION_FILE  defaults to "revoked.json"
-$RevocationRepo = $env:MOONLIGHT_REVOCATION_REPO
-$RevocationPat  = $env:MOONLIGHT_REVOCATION_PAT
-$RevocationFile = if ($env:MOONLIGHT_REVOCATION_FILE) { $env:MOONLIGHT_REVOCATION_FILE } else { "revoked.json" }
-if (-not $RevocationRepo -or -not $RevocationPat) {
-    Write-Host "[build] WARNING: MOONLIGHT_REVOCATION_REPO/_PAT not set."
+# Required env var: $env:MOONLIGHT_REVOCATION_URL
+$RevocationUrl = $env:MOONLIGHT_REVOCATION_URL
+if (-not $RevocationUrl) {
+    Write-Host "[build] WARNING: MOONLIGHT_REVOCATION_URL not set."
     Write-Host "[build] Building WITHOUT centralized revocation. Binary will run unrestricted."
-    $RevocationRepo = ""
-    $RevocationPat  = ""
+    $RevocationUrl = ""
 }
 
 $BuildDate  = (Get-Date).ToString("yyyy-MM-dd")
@@ -32,9 +26,7 @@ $Version    = (Select-String -Path pyproject.toml -Pattern '^version').Line -rep
 BUILD_DATE = "$BuildDate"
 BUILD_ID = "$BuildId"
 VERSION = "$Version"
-REVOCATION_REPO = "$RevocationRepo"
-REVOCATION_FILE = "$RevocationFile"
-REVOCATION_PAT = "$RevocationPat"
+REVOCATION_URL = "$RevocationUrl"
 "@ | Set-Content -Encoding UTF8 src\moonlight\_buildinfo.py
 
 Write-Host "[build] stamped $BuildId"
@@ -42,11 +34,9 @@ Write-Host "[build] stamped $BuildId"
 # ---------- prep environment ----------
 uv sync
 uv add --dev nuitka 2>$null
-
-# Ensure Playwright Chromium is present
 uv run playwright install chromium
 
-$OutDir = "dist\moonlight-windows-$BuildDate"
+$OutDir = "dist\moonlight-windows-amd64-$BuildDate"
 if (Test-Path $OutDir) { Remove-Item -Recurse -Force $OutDir }
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 
@@ -69,6 +59,7 @@ uv run python -m nuitka `
     --include-package=yaml `
     --include-package=click `
     --include-package=rich `
+    --include-package=httpx `
     --include-package-data=moonlight `
     --include-package-data=playwright `
     --windows-console-mode=force `
@@ -86,7 +77,6 @@ Copy-Item -Recurse src\moonlight\templates "$OutDir\runtime\moonlight\" -ErrorAc
 Copy-Item -Recurse src\moonlight\web\templates "$OutDir\runtime\moonlight\web\" -ErrorAction SilentlyContinue
 Copy-Item -Recurse src\moonlight\web\static "$OutDir\runtime\moonlight\web\" -ErrorAction SilentlyContinue
 
-# Bundle Playwright Chromium
 $PwCache = if ($env:PLAYWRIGHT_BROWSERS_PATH) { $env:PLAYWRIGHT_BROWSERS_PATH }
            else { "$env:USERPROFILE\AppData\Local\ms-playwright" }
 if (Test-Path $PwCache) {
@@ -94,7 +84,6 @@ if (Test-Path $PwCache) {
     Write-Host "[build] bundled Playwright browsers"
 }
 
-# Launcher .bat
 @"
 @echo off
 set MOONLIGHT_HOME=%~dp0
@@ -103,9 +92,6 @@ set PLAYWRIGHT_BROWSERS_PATH=%~dp0playwright-browsers
 "@ | Set-Content -Encoding ASCII "$OutDir\start.bat"
 
 Write-Host "[build] OK -> $OutDir\"
-$Size = (Get-ChildItem $OutDir -Recurse | Measure-Object Length -Sum).Sum / 1MB
-Write-Host ("[build] size: {0:N0} MB" -f $Size)
-Write-Host "[build] zip with: Compress-Archive -Path $OutDir\* -DestinationPath dist\moonlight-windows-$BuildDate.zip"
 
 # Restore source sentinel for dev work
 @'
@@ -113,8 +99,6 @@ Write-Host "[build] zip with: Compress-Archive -Path $OutDir\* -DestinationPath 
 BUILD_DATE = "SOURCE_BUILD"
 BUILD_ID = "source-build"
 VERSION = "0.1.0"
-REVOCATION_REPO = ""
-REVOCATION_FILE = "revoked.json"
-REVOCATION_PAT = ""
+REVOCATION_URL = ""
 '@ | Set-Content -Encoding UTF8 src\moonlight\_buildinfo.py
 Write-Host "[build] _buildinfo.py reset to SOURCE_BUILD for dev work"

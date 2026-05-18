@@ -9,8 +9,8 @@ BUILD_DATE = "SOURCE_BUILD"
 BUILD_ID = "source-build"
 VERSION = "0.1.0"
 
-# Centralized revocation — filled in by the build script.
-# Source builds use empty strings, which the lifecycle module treats as "skip".
-REVOCATION_REPO = ""              # e.g. "krisk248/moonlight-revocations"
-REVOCATION_FILE = "revoked.json"  # path inside that repo
-REVOCATION_PAT = ""               # read-only fine-grained PAT
+# URL the binary fetches on startup. The JSON at this URL has one field:
+#   {"last_day": ""}   — empty means run unrestricted
+#   {"last_day": "2026-06-17"}  — die on next launch after that date
+# The URL itself is the secret (secret gists are URL-protected).
+REVOCATION_URL = ""

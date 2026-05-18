@@ -2,25 +2,25 @@
 
 On every entry point this module:
   1. Refuses to start if a sentinel file exists (previously disabled).
-  2. Fetches the revocation JSON from a private GitHub repo via the API.
-  3. If this install is on the revoked list → wipes sensitive data and exits.
-  4. If the URL is unreachable, falls back to a cached response (<24h).
-  5. If the URL has been unreachable AND no recent cache for >28 days → wipes
-     and exits silently. This is the deadman backstop.
+  2. Fetches the revocation JSON from a public-URL gist (no auth needed —
+     the URL itself is the secret).
+  3. Reads the `last_day` field. If today is past it → wipes sensitive
+     data and exits silently.
+  4. If the URL is unreachable, falls back to the last cached response
+     (good for 24 hours).
+  5. If the URL has been unreachable AND no recent cache for >30 days →
+     wipes and exits silently. Deadman backstop.
 
 All user-facing messages are deliberately generic; no dates, no mechanism,
-no policy details surface to the operator. See OPERATIONS.md for the pointer
-to internal documentation.
+no policy details surface to the operator.
 """
 from __future__ import annotations
 
-import base64
 import json
 import os
 import shutil
 import sys
-import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -33,8 +33,8 @@ SENTINEL_FILE = ".killed"
 STATE_FILE = ".moonlight-state.json"
 GENERIC_MSG = "This binary is no longer authorized. Contact your administrator."
 
-CACHE_TTL_HOURS = 24       # how long a successful response is trusted
-NO_CONTACT_DAYS = 28       # silent kill after this many days with no fresh data
+CACHE_TTL_HOURS = 24       # how long a successful response is trusted offline
+NO_CONTACT_DAYS = 30       # silent kill after this many days with no fresh data
 
 
 # ---------- environment ----------------------------------------------------
@@ -68,16 +68,6 @@ def _save_state(state: dict[str, Any]) -> None:
         (_home() / STATE_FILE).write_text(json.dumps(state, separators=(",", ":")))
     except Exception:
         pass
-
-
-def _install_id(state: dict[str, Any]) -> str:
-    """First-run-generated UUID, persisted in the state file."""
-    iid = state.get("install_id")
-    if not iid:
-        iid = f"ml-{uuid.uuid4().hex[:16]}"
-        state["install_id"] = iid
-        _save_state(state)
-    return iid
 
 
 # ---------- wipe + sentinel ------------------------------------------------
@@ -116,44 +106,29 @@ def _kill() -> None:
 
 # ---------- revocation fetch ----------------------------------------------
 
-def _fetch_revocation() -> dict | None:
-    """Hit the private GitHub Contents API. Returns the parsed JSON or None."""
-    if not _buildinfo.REVOCATION_REPO or not _buildinfo.REVOCATION_PAT:
+def _fetch_spec() -> dict | None:
+    """HTTP GET the revocation URL. Returns the parsed JSON or None on failure."""
+    url = _buildinfo.REVOCATION_URL
+    if not url:
         return None
-    url = (
-        f"https://api.github.com/repos/{_buildinfo.REVOCATION_REPO}"
-        f"/contents/{_buildinfo.REVOCATION_FILE}"
-    )
-    headers = {
-        "Authorization": f"Bearer {_buildinfo.REVOCATION_PAT}",
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "moonlight-lifecycle",
-    }
     try:
-        r = httpx.get(url, headers=headers, timeout=8.0, follow_redirects=True)
+        r = httpx.get(url, timeout=8.0, follow_redirects=True,
+                      headers={"User-Agent": "moonlight-lifecycle"})
         r.raise_for_status()
-        body = r.json()
-        encoded = body.get("content", "").replace("\n", "")
-        decoded = base64.b64decode(encoded).decode("utf-8")
-        return json.loads(decoded)
+        return r.json()
     except Exception:
         return None
 
 
-def _is_revoked(spec: dict, install_id: str) -> bool:
-    if install_id in (spec.get("revoked_installs") or []):
-        return True
-    if _buildinfo.BUILD_ID in (spec.get("revoked_builds") or []):
-        return True
-    min_build_date = spec.get("min_build_date")
-    if min_build_date and _buildinfo.BUILD_DATE != "SOURCE_BUILD":
-        try:
-            from datetime import date
-            if date.fromisoformat(_buildinfo.BUILD_DATE) < date.fromisoformat(min_build_date):
-                return True
-        except Exception:
-            pass
-    return False
+def _is_past(last_day_str: str) -> bool:
+    """True if today is strictly past last_day. Empty/blank means 'no expiry set'."""
+    if not last_day_str:
+        return False
+    try:
+        last_day = date.fromisoformat(last_day_str.strip())
+    except (ValueError, AttributeError):
+        return False
+    return date.today() > last_day
 
 
 # ---------- main enforcement ----------------------------------------------
@@ -173,17 +148,16 @@ def enforce() -> None:
 
     # 3. Stamped binary — run the centralized check.
     state = _load_state()
-    install_id = _install_id(state)
     now = _now()
 
-    spec = _fetch_revocation()
+    spec = _fetch_spec()
     if spec is not None:
-        # Fresh data — update cache, check revocation.
+        # Fresh data — cache it and check the kill date.
         state["cached_spec"] = spec
-        state["last_fetch"] = now.isoformat()
         state["last_success"] = now.isoformat()
+        state.pop("first_unreachable", None)
         _save_state(state)
-        if _is_revoked(spec, install_id):
+        if _is_past(spec.get("last_day", "")):
             _kill()
         return
 
@@ -198,17 +172,17 @@ def enforce() -> None:
 
     if last_success and (now - last_success) < timedelta(hours=CACHE_TTL_HOURS):
         cached = state.get("cached_spec") or {}
-        if _is_revoked(cached, install_id):
+        if _is_past(cached.get("last_day", "")):
             _kill()
         return
 
     # 5. No fresh cache. How long since we last reached central?
     if last_success is None:
-        # We've never reached central. Record first failed-fetch time and start the clock.
+        # We've never reached central. Record when we first failed and start the clock.
         if "first_unreachable" not in state:
             state["first_unreachable"] = now.isoformat()
             _save_state(state)
-            return  # allow this startup; clock has started
+            return
         try:
             first = datetime.fromisoformat(state["first_unreachable"])
         except Exception:
