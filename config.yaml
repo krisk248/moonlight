@@ -1,0 +1,25 @@
+# Moonlight global config — override any of these per-scenario in scenarios/*.yaml
+ollama:
+  host: http://localhost:11434
+  model: ahmadwaqar/smolvlm2-2.2b-instruct
+  timeout_s: 120
+  options:
+    temperature: 0.0      # deterministic verdicts
+    num_predict: 200
+
+browser:
+  viewport:
+    width: 1280
+    height: 720
+  default_timeout_ms: 15000
+  headless: true          # set false in scenarios to watch a run
+
+diff:
+  threshold: 0.02         # 2% pixel diff before AI judgement kicks in
+                          # (raise higher for dynamic UIs, lower for static pages)
+  ignore_antialias: true
+
+paths:
+  scenarios: scenarios
+  baselines: baselines
+  runs: runs

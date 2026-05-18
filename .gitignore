@@ -1,0 +1,44 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+/build/
+/dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Moonlight runtime artifacts
+runs/
+.tmp/
+
+# Saved login state contains real cookies / tokens — never commit
+auth-state/
+
+# Scenarios + baselines are PRIVATE by default — they may contain internal
+# URLs and credentials. Only the public demo scenarios are explicitly tracked.
+scenarios/*
+!scenarios/.gitkeep
+!scenarios/demo-example.yaml
+!scenarios/google-tts-demo.yaml
+baselines/*
+!baselines/.gitkeep
+!baselines/demo-example/
+!baselines/google-tts-demo/
+
+# Install / start / runtime logs — may contain machine-specific paths or PII
+logs/*
+!logs/.gitkeep
+
+# Editor / tooling caches
+.serena/
+.vscode/
+.idea/
+*.swp
+
+# Build output and lifecycle artifacts (root-level only — install/build/ stays tracked)
+/dist/
+.killed
+.moonlight-state.json
+/build/

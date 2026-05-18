@@ -1,0 +1,15 @@
+{% if job.status in ('completed', 'failed') %}
+<div hx-trigger="load delay:300ms" hx-get="" hx-swap="none"
+     {% if job.kind == 'run' and job.result.run_id %}
+     hx-on::after-request="window.location.href='/runs/{{ job.result.run_id }}/view'"
+     {% elif job.kind in ('record', 'baseline') %}
+     hx-on::after-request="window.location.href='/'"
+     {% endif %}></div>
+<p class="badge {{ 'pass' if job.status == 'completed' else 'fail' }}">{{ job.status|upper }}</p>
+{% if job.result %}
+<pre class="result">{{ job.result }}</pre>
+{% endif %}
+{% if job.error %}<pre class="error">{{ job.error }}</pre>{% endif %}
+{% endif %}
+
+<pre class="log">{{ job.log }}</pre>

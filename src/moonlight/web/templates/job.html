@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Job {{ job.id }}{% endblock %}
+{% block content %}
+
+<section class="card">
+  <header>
+    <h2>Job <code>{{ job.id }}</code></h2>
+    <span class="badge {{ 'pass' if job.status == 'completed' else ('fail' if job.status == 'failed' else 'pending') }}">{{ job.status }}</span>
+  </header>
+  <p class="muted">{{ job.kind }} · {{ job.label }}</p>
+
+  <div hx-get="/jobs/{{ job.id }}/log"
+       hx-trigger="load, every 1500ms"
+       hx-swap="innerHTML">
+    {% include '_job_log.html' %}
+  </div>
+</section>
+
+{% endblock %}

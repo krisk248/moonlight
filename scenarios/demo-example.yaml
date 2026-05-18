@@ -1,0 +1,15 @@
+# Public demo scenario — safe to commit. Smoke test against example.com.
+name: demo-example
+url: https://example.com
+viewport:
+  width: 1280
+  height: 720
+headless: true
+steps:
+  - action: goto
+    url: /
+  - action: screenshot
+    name: landing
+    ai_check:
+      prompt: "Does this page show the IANA example.com placeholder content with a 'More information' link?"
+      expect: yes

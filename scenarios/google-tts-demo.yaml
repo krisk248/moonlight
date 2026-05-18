@@ -1,0 +1,28 @@
+# Public demo scenario — safe to commit.
+# NOTE: We originally aimed at google.com and duckduckgo.com but BOTH block
+# headless browsers with a CAPTCHA challenge. The AI correctly flagged both
+# runs as anomalies (a real-world validation of the AI verifier). Wikipedia
+# allows automation, so it's used here for a deterministic PASS demo.
+name: google-tts-demo
+url: https://en.wikipedia.org
+viewport:
+  width: 1280
+  height: 720
+headless: true
+steps:
+  - action: goto
+    url: /
+  - action: fill
+    selector: input[name=search]
+    value: Text-to-speech
+  - action: press
+    selector: input[name=search]
+    key: Enter
+  - action: wait_for
+    selector: '#firstHeading'
+  - action: screenshot
+    name: tts-article
+    full_page: false
+    ai_check:
+      prompt: "Does this page show a Wikipedia article about Speech synthesis or Text-to-speech, with article body content?"
+      expect: yes

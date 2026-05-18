@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+
+<section class="card">
+  <header><h2>System status</h2></header>
+  <div class="grid-3">
+    <div class="status-pill {{ 'ok' if ollama.binary_path else 'fail' }}">
+      <span class="label">Ollama binary</span>
+      <span class="value">{{ ollama.binary_path or 'not found' }}</span>
+    </div>
+    <div class="status-pill {{ 'ok' if ollama.server_running else 'fail' }}">
+      <span class="label">Ollama server</span>
+      <span class="value">
+        {% if ollama.server_running %}
+          running @ {{ ollama.server_url }} (pid {{ ollama.server_pid or '?' }})
+        {% else %}
+          stopped
+          <form method="post" action="/ollama/start" style="display:inline">
+            <button class="btn small">Start</button>
+          </form>
+        {% endif %}
+      </span>
+    </div>
+    <div class="status-pill {{ 'ok' if ollama.model_present else 'fail' }}">
+      <span class="label">Model</span>
+      <span class="value">
+        {{ ollama.model_name }}
+        {% if not ollama.model_present and ollama.server_running %}
+          <form method="post" action="/ollama/pull" style="display:inline">
+            <button class="btn small">Pull</button>
+          </form>
+        {% endif %}
+      </span>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <header>
+    <h2>Scenarios</h2>
+    <a href="/scenarios/new" class="btn primary small">+ Record New</a>
+  </header>
+  {% if scenarios %}
+  <table class="table">
+    <thead>
+      <tr><th>Name</th><th>URL</th><th>Steps</th><th>Baseline</th><th>Login</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for s in scenarios %}
+      <tr>
+        <td><a href="/scenarios/{{ s.name }}"><code>{{ s.name }}</code></a></td>
+        <td class="truncate">{{ s.url }}</td>
+        <td>{{ s.steps }}</td>
+        <td>{{ '✓' if s.has_baseline else '—' }}</td>
+        <td>{{ '🔒' if s.has_storage else '—' }}</td>
+        <td class="actions">
+          {% if not s.has_baseline %}
+          <form method="post" action="/scenarios/{{ s.name }}/baseline" style="display:inline">
+            <button class="btn small">Baseline</button>
+          </form>
+          {% endif %}
+          <form method="post" action="/scenarios/{{ s.name }}/run" style="display:inline">
+            <button class="btn small primary" {{ '' if s.has_baseline else 'disabled' }}>Run</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No scenarios yet. <a href="/scenarios/new">Record one</a>.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <header><h2>Recent runs</h2></header>
+  {% if runs %}
+  <table class="table">
+    <thead><tr><th>Verdict</th><th>Scenario</th><th>Started</th><th>Steps</th><th></th></tr></thead>
+    <tbody>
+      {% for r in runs %}
+      <tr>
+        <td><span class="badge {{ 'pass' if r.passed else 'fail' }}">{{ 'PASS' if r.passed else 'FAIL' }}</span></td>
+        <td><code>{{ r.scenario }}</code></td>
+        <td class="muted">{{ r.started_at }}</td>
+        <td>{{ r.step_count }} ({{ r.fail_count }} failed)</td>
+        <td><a class="btn small" href="/runs/{{ r.id }}/view">View report</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No runs yet.</p>
+  {% endif %}
+</section>
+
+{% if jobs %}
+<section class="card">
+  <header><h2>Recent jobs</h2></header>
+  <table class="table">
+    <thead><tr><th>Status</th><th>Kind</th><th>Label</th><th></th></tr></thead>
+    <tbody>
+      {% for j in jobs %}
+      <tr>
+        <td><span class="badge {{ 'pass' if j.status == 'completed' else ('fail' if j.status == 'failed' else 'pending') }}">{{ j.status }}</span></td>
+        <td>{{ j.kind }}</td>
+        <td class="truncate">{{ j.label }}</td>
+        <td><a class="btn small" href="/jobs/{{ j.id }}">View</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% endblock %}

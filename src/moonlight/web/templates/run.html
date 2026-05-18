@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Run · {{ run.scenario }}{% endblock %}
+{% block content %}
+
+<section class="card">
+  <header>
+    <div>
+      <h2>{{ run.scenario }}
+        <span class="badge {{ 'pass' if run.passed else 'fail' }}">{{ 'PASS' if run.passed else 'FAIL' }}</span>
+      </h2>
+      <p class="muted">
+        <code>{{ run.url }}</code>
+        · started {{ run.started_at }}
+        · finished {{ run.finished_at }}
+        · {{ run.steps|length }} steps
+        ({{ run.steps|selectattr('passed', 'equalto', false)|list|length }} failed)
+      </p>
+    </div>
+    <div class="actions">
+      <a href="{{ report_path }}" target="_blank" class="btn">Raw report</a>
+      <a href="/scenarios/{{ run.scenario }}" class="btn">Open scenario</a>
+      <form method="post" action="/scenarios/{{ run.scenario }}/run" style="display:inline">
+        <button class="btn primary">Run again</button>
+      </form>
+    </div>
+  </header>
+</section>
+
+{% if run.ai_summary %}
+<section class="card ai-summary">
+  <header><h2>AI summary</h2></header>
+  <blockquote class="big">{{ run.ai_summary }}</blockquote>
+</section>
+{% endif %}
+
+<section class="step-stream">
+  {% for s in run.steps %}
+  <article class="step-card {{ 'pass' if s.passed else 'fail' }}">
+    <header>
+      <span class="step-num">#{{ s.index }}</span>
+      <span class="step-action">{{ s.action }}</span>
+      <span class="step-name">{{ s.name }}</span>
+      <span class="spacer"></span>
+      <span class="badge {{ 'pass' if s.passed else 'fail' }}">{{ 'PASS' if s.passed else 'FAIL' }}</span>
+    </header>
+
+    {% if s.action == 'screenshot' %}
+      <div class="images3">
+        {% if s.baseline_url %}
+        <figure><figcaption>Baseline</figcaption>
+          <a href="{{ s.baseline_url }}" target="_blank"><img src="{{ s.baseline_url }}" loading="lazy"></a>
+        </figure>
+        {% endif %}
+        {% if s.screenshot_url %}
+        <figure><figcaption>Current run</figcaption>
+          <a href="{{ s.screenshot_url }}" target="_blank"><img src="{{ s.screenshot_url }}" loading="lazy"></a>
+        </figure>
+        {% endif %}
+        {% if s.diff_url %}
+        <figure><figcaption>Diff{% if s.diff_ratio %} ({{ '%.2f%%'|format(s.diff_ratio * 100) }} different){% endif %}</figcaption>
+          <a href="{{ s.diff_url }}" target="_blank"><img src="{{ s.diff_url }}" loading="lazy"></a>
+        </figure>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    {% if s.ai_narration %}
+    <div class="narration">
+      <span class="narration-icon">AI sees:</span>
+      <span class="narration-text">{{ s.ai_narration }}</span>
+    </div>
+    {% endif %}
+
+    {% if s.checks %}
+    <div class="verdicts">
+      {% for c in s.checks %}
+      <div class="verdict {{ 'pass' if c.passed else 'fail' }}">
+        <div class="verdict-head">
+          <span class="kind">
+            {% if c.kind == 'ai_check' %}AI looked at the screen{% endif %}
+            {% if c.kind == 'regression_judge' %}AI compared baseline vs current{% endif %}
+            {% if c.kind == 'ocr_check' %}AI read the text on screen{% endif %}
+          </span>
+          <span class="badge small {{ 'pass' if c.passed else 'fail' }}">{{ 'PASS' if c.passed else 'FAIL' }}</span>
+        </div>
+        <blockquote>{{ c.detail }}</blockquote>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if s.error %}<pre class="error">{{ s.error }}</pre>{% endif %}
+
+    {% set activity_total = (s.console_messages|length) + (s.failed_requests|length) + (s.page_errors|length) %}
+    {% if activity_total %}
+    <details class="activity">
+      <summary>
+        Browser activity ({{ s.console_messages|length }} console,
+        {{ s.failed_requests|length }} failed requests,
+        {{ s.page_errors|length }} JS errors)
+      </summary>
+      {% if s.console_messages %}
+      <h4>Console</h4>
+      <ul class="evlist">
+        {% for c in s.console_messages %}
+        <li><span class="ev-tag tag-{{ c.type }}">{{ c.type }}</span> <code>{{ c.text }}</code></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if s.failed_requests %}
+      <h4>Failed requests</h4>
+      <ul class="evlist">
+        {% for r in s.failed_requests %}
+        <li><span class="ev-tag tag-error">{{ r.status or r.failure or 'failed' }}</span> {{ r.method }} <code>{{ r.url }}</code></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if s.page_errors %}
+      <h4>JS errors</h4>
+      <ul class="evlist">
+        {% for e in s.page_errors %}<li><code>{{ e }}</code></li>{% endfor %}
+      </ul>
+      {% endif %}
+    </details>
+    {% endif %}
+
+    {% if s.action != 'screenshot' and not s.checks and not s.error %}
+    <p class="muted no-check">No verification on this step — it's just a browser action.</p>
+    {% endif %}
+  </article>
+  {% endfor %}
+</section>
+
+{% endblock %}

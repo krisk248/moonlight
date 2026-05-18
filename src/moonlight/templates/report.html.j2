@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Moonlight Report — {{ result.scenario }}</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, "SF Pro Text", "Inter", sans-serif; margin: 0; padding: 32px; background: #0e1117; color: #e6edf3; }
+  h1 { margin: 0 0 4px; font-size: 24px; }
+  .meta { color: #8b949e; margin-bottom: 24px; font-size: 14px; }
+  .badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-weight: 600; font-size: 13px; margin-left: 8px; }
+  .pass { background: #1f4d2c; color: #7ee787; }
+  .fail { background: #5a1e1e; color: #ff7b72; }
+  .step { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; }
+  .step header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+  .step h2 { margin: 0; font-size: 16px; font-weight: 600; }
+  .images { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; }
+  .images figure { margin: 0; }
+  .images figcaption { color: #8b949e; font-size: 12px; margin-bottom: 4px; }
+  .images img { width: 100%; border: 1px solid #30363d; border-radius: 4px; }
+  .checks { margin-top: 12px; font-size: 13px; }
+  .checks li { margin-bottom: 6px; }
+  code { background: #21262d; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .error { color: #ff7b72; font-family: ui-monospace, monospace; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>{{ result.scenario }}
+  <span class="badge {{ 'pass' if result.passed else 'fail' }}">{{ 'PASS' if result.passed else 'FAIL' }}</span>
+</h1>
+<div class="meta">
+  URL: <code>{{ result.url }}</code> · started {{ result.started_at }} · finished {{ result.finished_at }}
+</div>
+
+{% for step in result.steps %}
+<section class="step">
+  <header>
+    <h2>#{{ step.index }} — {{ step.action }} ({{ step.name }})</h2>
+    <span class="badge {{ 'pass' if step.passed else 'fail' }}">{{ 'PASS' if step.passed else 'FAIL' }}</span>
+  </header>
+
+  {% if step.error %}<div class="error">{{ step.error }}</div>{% endif %}
+
+  {% if step.screenshot or step.baseline %}
+  <div class="images">
+    {% if step.baseline %}<figure><figcaption>Baseline</figcaption><img src="{{ rel(step.baseline) }}"></figure>{% endif %}
+    {% if step.screenshot %}<figure><figcaption>Current</figcaption><img src="{{ rel(step.screenshot) }}"></figure>{% endif %}
+    {% if step.diff_overlay %}<figure><figcaption>Diff ({{ '%.2f%%'|format((step.diff_ratio or 0) * 100) }})</figcaption><img src="{{ rel(step.diff_overlay) }}"></figure>{% endif %}
+  </div>
+  {% endif %}
+
+  {% if step.checks %}
+  <ul class="checks">
+    {% for c in step.checks %}
+    <li>
+      <span class="badge {{ 'pass' if c.passed else 'fail' }}">{{ c.kind }}</span>
+      {{ c.detail }}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+{% endfor %}
+</body>
+</html>
