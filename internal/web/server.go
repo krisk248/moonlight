@@ -18,6 +18,7 @@ import (
 
 	"github.com/krisk248/moonlight/internal/buildinfo"
 	"github.com/krisk248/moonlight/internal/lifecycle"
+	"github.com/krisk248/moonlight/internal/recorder"
 	"github.com/krisk248/moonlight/internal/runner"
 	"github.com/krisk248/moonlight/internal/scenario"
 	"github.com/krisk248/moonlight/internal/vision"
@@ -60,6 +61,8 @@ func (s *Server) Handler() http.Handler {
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/status", s.handleStatus)
 		r.Get("/scenarios", s.handleListScenarios)
+		r.Post("/scenarios", s.handleCreateScenario)
+		r.Post("/scenarios/record", s.handleRecord)
 		r.Get("/scenarios/{name}", s.handleGetScenario)
 		r.Post("/scenarios/{name}/baseline", s.handleBaseline)
 		r.Post("/scenarios/{name}/run", s.handleRun)
@@ -150,6 +153,95 @@ func (s *Server) handleDeleteScenario(w http.ResponseWriter, r *http.Request) {
 	_ = os.Remove(filepath.Join(s.cfg.ScenarioDir, name+".yaml"))
 	_ = os.RemoveAll(filepath.Join(s.cfg.BaselineDir, name))
 	w.WriteHeader(204)
+}
+
+// handleCreateScenario writes an empty starter YAML at the requested name.
+// Body: {"name": "...", "url": "..."}
+func (s *Server) handleCreateScenario(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+		URL  string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	body.Name = sanitizeName(body.Name)
+	if body.Name == "" || body.URL == "" {
+		writeError(w, 400, fmt.Errorf("name and url are required"))
+		return
+	}
+	path := filepath.Join(s.cfg.ScenarioDir, body.Name+".yaml")
+	if _, err := os.Stat(path); err == nil {
+		writeError(w, 409, fmt.Errorf("scenario %q already exists", body.Name))
+		return
+	}
+	sc := &scenario.Scenario{
+		Name:     body.Name,
+		URL:      body.URL,
+		Viewport: scenario.Viewport{Width: 1280, Height: 720},
+		Steps: []scenario.Step{
+			{Action: "goto", URL: "/"},
+			{Action: "screenshot", Name: "landing",
+				DOMCheck: &scenario.DOMCheck{URLContains: ""}},
+		},
+	}
+	if err := scenario.Save(sc, path); err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	writeJSON(w, sc)
+}
+
+// handleRecord launches `npx playwright codegen` as a background job. The
+// browser window opens on whoever's desktop the server is running on.
+// Body: {"name": "...", "url": "..."}
+func (s *Server) handleRecord(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+		URL  string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	body.Name = sanitizeName(body.Name)
+	if body.Name == "" || body.URL == "" {
+		writeError(w, 400, fmt.Errorf("name and url are required"))
+		return
+	}
+	out := filepath.Join(s.cfg.ScenarioDir, body.Name+".yaml")
+
+	job := s.jobs.create("record", fmt.Sprintf("record %s (%s)", body.Name, body.URL))
+	go func() {
+		s.jobs.log(job.ID, fmt.Sprintf("[record] launching codegen for %s", body.URL))
+		s.jobs.log(job.ID, "[record] a Chromium window will open on the server's desktop")
+		s.jobs.log(job.ID, "[record] click through your flow, then close the window")
+		_, err := recorder.Record(recorder.Options{
+			URL:          body.URL,
+			ScenarioName: body.Name,
+			Viewport:     scenario.Viewport{Width: 1280, Height: 720},
+			OutputPath:   out,
+		})
+		if err != nil {
+			s.jobs.finish(job.ID, nil, err)
+			return
+		}
+		s.jobs.log(job.ID, fmt.Sprintf("[record] wrote %s", out))
+		s.jobs.finish(job.ID, nil, nil)
+	}()
+	writeJSON(w, job)
+}
+
+func sanitizeName(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func (s *Server) handleBaseline(w http.ResponseWriter, r *http.Request) {
