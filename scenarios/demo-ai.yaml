@@ -1,0 +1,16 @@
+# AI mode demo — uses an ai_check that asks SmolVLM2 a yes/no question.
+# Needs Ollama running locally with ahmadwaqar/smolvlm2-2.2b-instruct pulled.
+name: demo-ai
+url: https://example.com
+viewport:
+  width: 1280
+  height: 720
+headless: true
+steps:
+  - action: goto
+    url: /
+  - action: screenshot
+    name: landing
+    ai_check:
+      prompt: "Does this page show the IANA example.com placeholder content with a 'More information' link?"
+      expect: yes

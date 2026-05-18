@@ -1,0 +1,17 @@
+# Basic mode demo — uses ONLY dom_check assertions.
+# Runs with no Ollama installed.
+name: demo-basic
+url: https://example.com
+viewport:
+  width: 1280
+  height: 720
+headless: true
+steps:
+  - action: goto
+    url: /
+  - action: screenshot
+    name: landing
+    dom_check:
+      contains_text:
+        - "Example Domain"
+      url_contains: "example.com"

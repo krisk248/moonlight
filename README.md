@@ -1,182 +1,217 @@
 # Moonlight
 
-Automated visual regression testing for web apps. Drives Chromium with
-Playwright, captures screenshots, and uses a local vision model
-(SmolVLM2-2.2B via Ollama) to add yes/no sanity checks on top of pixel
-diffs. The AI flags obvious anomalies (CAPTCHAs, wrong pages, missing
-content); pixel diff, browser-event capture, and Playwright assertions
-catch the rest.
+Automated regression testing for web apps, written in Go.
 
-Operational lifecycle and refresh procedures: see [OPERATIONS.md](OPERATIONS.md).
+Drives Chromium via Playwright, captures screenshots, and verifies each step
+with either:
 
-Works on **Windows 11** and **Linux**. Each tester runs the whole stack on
-their own machine; no central server or login needed.
+- **Basic mode** — deterministic DOM assertions (text, visibility, URL). No
+  AI involved. Runs without Ollama.
+- **AI mode** — augments DOM assertions with a local SmolVLM2-2.2B vision
+  model that answers yes/no questions about screenshots. Requires Ollama.
 
-### Honest capabilities (so expectations match reality)
-
-| Capability | Status |
-|---|---|
-| Records browser flows reliably | yes |
-| Replays them deterministically | yes |
-| Detects pixel-level visual regressions | yes |
-| Captures browser console / network / JS errors | yes |
-| Flags obvious wrong-page failures via the AI | yes |
-| Catches subtle UI bugs the way a human would | **no** — the model is small (2.2B); use for sanity checks, not as your only QA layer |
-| Reads on-screen text reliably (OCR) | **no** — hallucinates HTML at Q8; switch to FP16 if OCR is critical |
-| Replaces human QA | **no** |
+The mode is decided **per scenario** by whether the YAML carries `ai_check:`
+blocks. A scenario with only `dom_check:` blocks never contacts Ollama.
 
 ---
 
-## Windows 11 — Quick start
-
-> Tested on Windows 11 with PowerShell 7+. You need `winget` (App Installer
-> from the Microsoft Store) and ~6 GB of free disk space for the model and
-> Chromium.
-
-```powershell
-# 1. Clone
-git clone https://github.com/<your-org>/moonlight
-cd moonlight
-
-# 2. Install (one command — sets up Python, uv, Ollama, the model, Chromium)
-.\install\windows\install.ps1
-
-# 3. Start the dashboard
-.\install\windows\start.ps1
-```
-
-A browser opens at <http://127.0.0.1:8765>. That's it.
-
-If anything goes wrong, the install script writes a full transcript to
-`logs\install-<timestamp>.log`. Send that to the team.
-
-To stop: `.\install\windows\stop.ps1`
-
----
-
-## Linux — Quick start
+## Quick start
 
 ```bash
-git clone https://github.com/<your-org>/moonlight
-cd moonlight
-./install/linux/install.sh
-./install/linux/start.sh
+# 1. Build
+go build -o moonlight ./cmd/moonlight
+
+# 2. Install Playwright browsers (one-time, ~150 MB)
+go run github.com/playwright-community/playwright-go/cmd/playwright@v0.5700.1 install chromium
+
+# 3. Start the dashboard
+./moonlight serve
+# → open http://127.0.0.1:8765
+
+# 4. Or run a scenario directly from the terminal
+./moonlight baseline demo-basic   # first time — captures reference screenshots
+./moonlight run      demo-basic   # subsequent runs — diff against baseline
 ```
 
-Open <http://127.0.0.1:8765>. Same as Windows.
+`demo-basic.yaml` uses only `dom_check` — runs with no Ollama installed.
+
+`demo-ai.yaml` uses `ai_check` — requires:
+
+```bash
+# Install Ollama (Linux)
+curl -fsSL https://ollama.com/install.sh | sh
+ollama serve &
+ollama pull ahmadwaqar/smolvlm2-2.2b-instruct
+
+# Then:
+./moonlight run demo-ai
+```
 
 ---
 
-## What it does
+## Scenario YAML
 
-Once the dashboard is up:
+```yaml
+name: login-smoke
+url: https://app.example.com
+viewport: {width: 1280, height: 720}
+headless: true
+steps:
+  - action: goto
+    url: /login
+  - action: fill
+    selector: input[name=email]
+    value: qa@example.com
+  - action: fill
+    selector: input[name=password]
+    value: <REDACTED>
+  - action: click
+    selector: button[type=submit]
+  - action: wait_for
+    selector: .dashboard
+  - action: screenshot
+    name: dashboard
+    dom_check:                            # basic mode — deterministic
+      contains_text: ["Welcome back"]
+      selector_visible: ".user-menu"
+      url_contains: "/dashboard"
+    ai_check:                             # AI mode — adds a yes/no judgement
+      prompt: "Is the user logged in viewing a dashboard with no error messages?"
+      expect: yes
+```
 
-1. **Click `+ Record Scenario`**, type a name and your app's URL, tick
-   *Save login state* if your app needs sign-in.
-2. **A Chromium window opens on your desktop.** Click through your test
-   flow — login, navigate, do whatever you want to verify. Close the
-   window when you're done.
-3. **The scenario YAML is generated** with placeholder AI prompts at every
-   screenshot step. Open the scenario and replace each `TODO: …` with a
-   specific yes/no question, e.g. *"Is the user logged in viewing the
-   dashboard with no error messages?"*
-4. **Click `Baseline`** — Moonlight replays your recording silently and
-   saves the screenshots as the "correct" reference.
-5. **Click `Run`** — every time you want to check for regressions. The AI
-   compares each screenshot to its baseline, answers your yes/no question,
-   captures browser console + network errors, and writes a full report.
+### Supported `action` types
 
-The report shows for every step:
-- baseline / current / diff thumbnails side-by-side
-- a one-sentence AI description of what's on screen
-- yes/no AI verdicts with explanation
-- browser console messages, failed network requests, JS errors
-- an AI summary at the top describing the whole run in plain English
+`goto`, `click`, `fill`, `select`, `press`, `wait_for`, `wait_ms`, `scroll`,
+`screenshot`.
 
----
+Locators on `click`/`fill`/`press`/`select`/`wait_for` steps: one of
+`selector`, `role` (+ optional `role_name`), `label`, `text`.
 
-## What's bundled
+### Supported `dom_check` fields
 
-| Scenario | What it tests |
+| Field | Asserts |
 |---|---|
-| `demo-example` | Smoke test against example.com. Always passes. |
-| `google-tts-demo` | Searches Wikipedia for "Text-to-speech" and verifies the article loads. Uses Wikipedia instead of Google because Google blocks headless browsers — and the AI correctly caught that, which is documented in the repo's history. |
+| `contains_text: ["A", "B"]` | Page body contains EVERY string in the list |
+| `selector_visible: ".x"` | This selector resolves to a visible element |
+| `selector_hidden: ".x"` | This selector is NOT visible (or doesn't exist) |
+| `url_contains: "/path"` | The current page URL contains the substring |
+| `url_matches: "^https://.*$"` | The current page URL matches the regex |
+
+All listed conditions must pass for the check to succeed.
+
+### `ai_check` fields
+
+| Field | Meaning |
+|---|---|
+| `prompt: "..."` | Yes/no question for SmolVLM2 |
+| `expect: yes \| no` | Expected first-token answer |
 
 ---
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│ Your machine                                                 │
-│                                                              │
-│   Moonlight (Python + FastAPI)        :8765                  │
-│     ├── runs Playwright → Chromium                           │
-│     ├── sends screenshots to Ollama for verification         │
-│     └── writes runs/<timestamp>/report.html + report.json    │
-│                                                              │
-│   Ollama (separate process)           :11434                 │
-│     └── serves the SmolVLM2 2.2B vision model                │
-└──────────────────────────────────────────────────────────────┘
+.
+├── cmd/moonlight/         # main entry — CLI + embedded HTML status page
+│   ├── main.go
+│   └── web/index.html     # embedded dashboard (vanilla JS for now)
+├── internal/
+│   ├── buildinfo/         # stamped at build time (version, build id, kill URL)
+│   ├── lifecycle/         # centralized kill switch (last_day from a gist)
+│   ├── scenario/          # YAML schema + Load/Save/ListDir
+│   ├── browser/           # Playwright wrapper, browser event capture
+│   ├── dom/               # deterministic dom_check evaluation
+│   ├── vision/            # Ollama client for ai_check / narrate / summarize
+│   ├── diff/              # native Go pixel diff with red overlay
+│   ├── runner/            # scenario orchestrator
+│   └── web/               # HTTP API server (chi router)
+└── scenarios/             # YAML scenarios (private by default, gitignored)
 ```
 
-- **Chromium (Playwright)** is the "hands and eyes" — clicks, types, screenshots.
-- **SmolVLM2** is the "QA brain" — looks at screenshots and judges if they're correct.
-- Browser events (console, network, page errors) are also captured per step for debugging.
-
----
-
-## CLI alternative (if you prefer the terminal)
+Every package has a unit test suite. Run with:
 
 ```bash
-uv run moonlight serve          # same as start.ps1 / start.sh
-uv run moonlight record URL NAME
-uv run moonlight baseline NAME
-uv run moonlight run NAME
-uv run moonlight run --all
-uv run moonlight selftest
+go test ./...
 ```
 
----
-
-## Logging
-
-Every script writes to the `logs/` folder (gitignored):
-
-- `logs/install-<ts>.log` — full transcript of the installer
-- `logs/start-<ts>.log` — what `start` did
-- `logs/runtime-<ts>.log` — Moonlight's own stdout/stderr while running
-- `logs/ollama-serve.log` — Ollama server output
-- `runs/<ts>/report.html` — per-run AI-annotated report
-- `runs/<ts>/report.json` — same data, machine-readable
-
-When something breaks, attaching the relevant log usually pinpoints it.
+Six packages, table-driven tests, HTTP mocks for the Ollama client and the
+revocation URL — no live browser or live Ollama needed for the unit suite.
 
 ---
 
-## Troubleshooting
+## Kill switch (lifecycle)
 
-| Symptom | Fix |
+Each binary has a fetch URL baked in at build time
+(`internal/buildinfo.RevocationURL`). On every startup the binary:
+
+1. Refuses to start if `.killed` exists.
+2. Source builds (`go run`, plain `go build`) are unrestricted.
+3. Stamped builds fetch the URL — expected JSON: `{"last_day": ""}`.
+4. If `last_day` is set and today is past it → silently deletes
+   `scenarios/*.yaml` + `auth-state/*.json`, writes `.killed`, exits.
+5. If the URL is unreachable, last successful response is cached and trusted
+   for 24 hours.
+6. If unreachable for 30 days straight → silent kill regardless.
+
+To kill all installations org-wide: set `last_day` to yesterday in the
+hosted JSON. Within ~5 min (CDN cache), every running binary's next start
+will wipe and exit.
+
+To build a stamped binary (replace the URL with yours):
+
+```bash
+RURL="https://gist.githubusercontent.com/krisk248/14fec43b1bb1ba9dbbde91728b4c9985/raw/revoked.json"
+BUILD_DATE=$(date -u +%Y-%m-%d)
+BUILD_ID="ml-$BUILD_DATE-$(head -c4 /dev/urandom | xxd -p)"
+
+go build \
+  -ldflags "-X github.com/krisk248/moonlight/internal/buildinfo.BuildDate=$BUILD_DATE \
+            -X github.com/krisk248/moonlight/internal/buildinfo.BuildID=$BUILD_ID \
+            -X github.com/krisk248/moonlight/internal/buildinfo.RevocationURL=$RURL" \
+  -o dist/moonlight ./cmd/moonlight
+```
+
+For a Windows .exe from Linux:
+
+```bash
+GOOS=windows GOARCH=amd64 go build \
+  -ldflags "-X ... " \
+  -o dist/moonlight.exe ./cmd/moonlight
+```
+
+(See [OPERATIONS.md](OPERATIONS.md) for the operational lifecycle pointer.)
+
+---
+
+## What's intentionally NOT yet in this build
+
+This is the Go rewrite's first cut. The following are TODO and tracked for
+follow-up sessions:
+
+- **Svelte dashboard** — current frontend is a minimal embedded HTML page
+  for status verification. SvelteKit UI is planned.
+- **Recorder** — `playwright codegen` integration to auto-generate YAML
+  from a browser session. Currently you author YAML by hand.
+- **Login state persistence** — `storage_state:` field works, but no UX yet
+  for capturing the file at record time.
+- **GitHub Actions release pipeline** — local builds work; CI pipeline
+  TBD.
+
+---
+
+## Honest capabilities
+
+| Capability | Status |
 |---|---|
-| Installer says `winget not found` | Open Microsoft Store → install *App Installer*, then re-run. |
-| Dashboard page shows but `Run` errors with "ollama unreachable" | Ollama isn't running. `start.ps1` should start it; try running it manually with `ollama serve` in a new terminal. |
-| `Run` fails with "Unexpected token … name=" in selector | Old recording with a broken selector. The runner auto-migrates these in memory; if you still see it, check that you're on the latest version. |
-| Tests fail because the AI says NO | Open the run report, read the **AI sees** line and the **AI looked at the screen** verdict. Often you just need to tighten the `ai_check.prompt` in the YAML. |
-| Google or DuckDuckGo blocked with CAPTCHA | Expected — they block headless browsers. The AI correctly says NO. Use Wikipedia or your own app for tests. |
-
----
-
-## Updating
-
-```bash
-git pull
-# Windows
-.\install\windows\install.ps1   # re-runs uv sync, refreshes deps
-# Linux
-./install/linux/install.sh
-```
-
-Your scenarios, baselines, and saved login state are preserved across updates.
+| Records browser flows reliably | Manual YAML for now; codegen integration TODO |
+| Replays scenarios deterministically | yes |
+| Detects pixel-level visual regressions | yes |
+| Captures browser console / network / JS errors | yes |
+| Deterministic DOM assertions (no AI) | yes |
+| Flags obvious wrong-page failures via AI | yes (when `ai_check` is used) |
+| Catches subtle UI bugs the way a human would | **no** — SmolVLM2 is small; use AI for sanity checks, not as primary QA |
+| Replaces human QA | **no** |
 
 ---
 
