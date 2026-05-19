@@ -18,7 +18,11 @@ export interface SettingsResponse {
 	ai_enabled: boolean;
 	ollama_host: string;
 	ollama_model: string;
+	default_viewport_width: number;
+	default_viewport_height: number;
+	default_headless: boolean;
 	default_timeout_ms: number;
+	default_diff_tolerance: number;
 }
 
 export interface ScenarioSummary {

@@ -17,6 +17,22 @@ func TestDefault_AIDisabled(t *testing.T) {
 	}
 }
 
+func TestDefault_Viewport1080p(t *testing.T) {
+	d := Default()
+	if d.DefaultViewportWidth != 1920 || d.DefaultViewportHeight != 1080 {
+		t.Errorf("expected 1920x1080 default; got %dx%d", d.DefaultViewportWidth, d.DefaultViewportHeight)
+	}
+	if !d.DefaultHeadless {
+		t.Errorf("default should be headless")
+	}
+	if d.DefaultTimeoutMS != 15000 {
+		t.Errorf("default timeout should be 15000 ms; got %d", d.DefaultTimeoutMS)
+	}
+	if d.DefaultDiffToleranceU8 != 12 {
+		t.Errorf("default diff tolerance should be 12; got %d", d.DefaultDiffToleranceU8)
+	}
+}
+
 func TestStoreRoundtrip(t *testing.T) {
 	tmp := t.TempDir()
 	s1, err := NewStore(tmp)

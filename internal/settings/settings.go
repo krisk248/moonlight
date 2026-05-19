@@ -20,20 +20,38 @@ const Filename = "settings.json"
 
 // Settings is the persisted shape. New fields must have non-nil defaults
 // in Default() so older files keep working.
+//
+// Anything user-tunable should live here. Future devs: when you're tempted
+// to hardcode a constant in code, add it here first.
 type Settings struct {
-	AIEnabled       bool   `json:"ai_enabled"`
-	OllamaHost      string `json:"ollama_host"`
-	OllamaModel     string `json:"ollama_model"`
-	DefaultTimeoutMS int   `json:"default_timeout_ms"` // global Playwright timeout (per action). 0 → 15000.
+	// AI verification (default off)
+	AIEnabled   bool   `json:"ai_enabled"`
+	OllamaHost  string `json:"ollama_host"`
+	OllamaModel string `json:"ollama_model"`
+
+	// Browser defaults applied when a scenario YAML doesn't specify its own.
+	// Most laptops/desktops are 1080p — 1920x1080 is the sane default.
+	DefaultViewportWidth  int  `json:"default_viewport_width"`
+	DefaultViewportHeight int  `json:"default_viewport_height"`
+	DefaultHeadless       bool `json:"default_headless"`
+
+	// Runner defaults.
+	DefaultTimeoutMS    int `json:"default_timeout_ms"`    // Playwright per-action timeout in ms
+	DefaultDiffToleranceU8 int `json:"default_diff_tolerance"` // 0..255 per-channel delta before a pixel counts as "changed"
 }
 
-// Default returns the out-of-box configuration (AI disabled).
+// Default returns the out-of-box configuration (AI disabled, 1080p viewport,
+// headless, 15s action timeout, mild pixel-diff tolerance).
 func Default() Settings {
 	return Settings{
-		AIEnabled:        false,
-		OllamaHost:       "http://127.0.0.1:11434",
-		OllamaModel:      "ahmadwaqar/smolvlm2-2.2b-instruct",
-		DefaultTimeoutMS: 15000,
+		AIEnabled:              false,
+		OllamaHost:             "http://127.0.0.1:11434",
+		OllamaModel:            "ahmadwaqar/smolvlm2-2.2b-instruct",
+		DefaultViewportWidth:   1920,
+		DefaultViewportHeight:  1080,
+		DefaultHeadless:        true,
+		DefaultTimeoutMS:       15000,
+		DefaultDiffToleranceU8: 12,
 	}
 }
 
@@ -74,6 +92,15 @@ func (s *Store) load() error {
 	}
 	if v.DefaultTimeoutMS == 0 {
 		v.DefaultTimeoutMS = d.DefaultTimeoutMS
+	}
+	if v.DefaultViewportWidth == 0 {
+		v.DefaultViewportWidth = d.DefaultViewportWidth
+	}
+	if v.DefaultViewportHeight == 0 {
+		v.DefaultViewportHeight = d.DefaultViewportHeight
+	}
+	if v.DefaultDiffToleranceU8 == 0 {
+		v.DefaultDiffToleranceU8 = d.DefaultDiffToleranceU8
 	}
 	s.cur = v
 	return nil

@@ -21,13 +21,28 @@
 		savedMessage = '';
 		try {
 			settings = await api.updateSettings(settings);
-			savedMessage = 'Saved. Reload other tabs to see changes.';
+			savedMessage = 'Saved. New defaults apply to all future runs.';
 		} catch (e) {
 			error = (e as Error).message;
 		} finally {
 			saving = false;
 			setTimeout(() => (savedMessage = ''), 4000);
 		}
+	}
+
+	// Common viewport presets for quick selection.
+	const presets = [
+		{ label: '1920 × 1080 (Full HD laptop/desktop)', w: 1920, h: 1080 },
+		{ label: '1440 × 900 (MacBook-class laptop)', w: 1440, h: 900 },
+		{ label: '1366 × 768 (older laptop)', w: 1366, h: 768 },
+		{ label: '1280 × 720 (small / compact)', w: 1280, h: 720 },
+		{ label: '2560 × 1440 (QHD)', w: 2560, h: 1440 }
+	];
+
+	function applyPreset(p: { w: number; h: number }) {
+		if (!settings) return;
+		settings.default_viewport_width = p.w;
+		settings.default_viewport_height = p.h;
 	}
 
 	onMount(load);
@@ -47,6 +62,103 @@
 
 	{#if settings}
 		<div class="form">
+			<!-- ────────── Browser defaults ────────── -->
+			<h3 class="section-h">Browser defaults</h3>
+			<p class="muted small">
+				Applied when a scenario YAML doesn't pin its own viewport / headless mode.
+				Most testers should leave these at 1920×1080 headless — that's what laptops
+				and desktops typically render at.
+			</p>
+
+			<div class="row col">
+				<span class="title">Default viewport size</span>
+				<div class="viewport-row">
+					<div class="viewport-input">
+						<label>Width</label>
+						<input
+							type="number"
+							bind:value={settings.default_viewport_width}
+							min="320"
+							max="3840"
+							step="10"
+						/>
+					</div>
+					<span class="x">×</span>
+					<div class="viewport-input">
+						<label>Height</label>
+						<input
+							type="number"
+							bind:value={settings.default_viewport_height}
+							min="240"
+							max="2160"
+							step="10"
+						/>
+					</div>
+					<select onchange={(e) => {
+						const p = presets.find((p) => p.label === (e.target as HTMLSelectElement).value);
+						if (p) applyPreset(p);
+					}}>
+						<option value="">Quick preset…</option>
+						{#each presets as p}
+							<option value={p.label}>{p.label}</option>
+						{/each}
+					</select>
+				</div>
+			</div>
+
+			<label class="row">
+				<div>
+					<div class="title">Default headless mode</div>
+					<div class="muted small">
+						If on, Chromium runs invisibly during scenarios. Turn off to watch
+						the browser drive itself (useful for debugging).
+					</div>
+				</div>
+				<label class="switch">
+					<input type="checkbox" bind:checked={settings.default_headless} />
+					<span class="slider"></span>
+				</label>
+			</label>
+
+			<!-- ────────── Runtime tuning ────────── -->
+			<h3 class="section-h">Runtime tuning</h3>
+
+			<label class="row col">
+				<span class="title">Default action timeout (ms)</span>
+				<input
+					type="number"
+					bind:value={settings.default_timeout_ms}
+					min="1000"
+					step="1000"
+					placeholder="15000"
+				/>
+				<span class="muted small">
+					How long Playwright waits for an element before failing a click/fill (default
+					15000 = 15 s). Individual steps can override with <code>timeout_ms: 30000</code>
+					in the YAML.
+				</span>
+			</label>
+
+			<label class="row col">
+				<span class="title">Pixel diff tolerance (0–255)</span>
+				<input
+					type="number"
+					bind:value={settings.default_diff_tolerance}
+					min="0"
+					max="255"
+					step="1"
+					placeholder="12"
+				/>
+				<span class="muted small">
+					Maximum per-channel colour delta before a pixel is marked "changed".
+					Lower = stricter (more failures from anti-aliasing noise). Higher =
+					looser. 12 is a balanced default.
+				</span>
+			</label>
+
+			<!-- ────────── AI ────────── -->
+			<h3 class="section-h">AI verification</h3>
+
 			<label class="row">
 				<div>
 					<div class="title">Enable AI assistance</div>
@@ -84,21 +196,6 @@
 				</div>
 			{/if}
 
-			<label class="row col">
-				<span class="title">Default action timeout (ms)</span>
-				<input
-					type="number"
-					bind:value={settings.default_timeout_ms}
-					min="1000"
-					step="1000"
-					placeholder="15000"
-				/>
-				<span class="muted small">
-					How long Playwright waits for an element before failing a click/fill (default 15000 = 15 s).
-					Individual steps can override with <code>timeout_ms: 30000</code> in the YAML.
-				</span>
-			</label>
-
 			<div class="actions">
 				<button class="btn primary" disabled={saving} onclick={save}>
 					{saving ? 'Saving…' : 'Save settings'}
@@ -115,24 +212,34 @@
 	.form {
 		display: flex;
 		flex-direction: column;
-		gap: 18px;
-		max-width: 720px;
+		gap: 14px;
+		max-width: 760px;
+	}
+	.section-h {
+		font-size: 13px;
+		color: var(--muted);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin: 20px 0 4px;
+		padding-top: 12px;
+		border-top: 1px solid var(--border);
+	}
+	.section-h:first-of-type {
+		border-top: none;
+		padding-top: 0;
+		margin-top: 0;
 	}
 	.row {
 		display: flex;
 		gap: 16px;
 		align-items: flex-start;
 		justify-content: space-between;
-		padding: 14px 0;
-		border-bottom: 1px solid var(--border);
+		padding: 12px 0;
 	}
 	.row.col {
 		flex-direction: column;
 		align-items: stretch;
 		gap: 6px;
-	}
-	.row:last-child {
-		border-bottom: 0;
 	}
 	.title {
 		font-weight: 600;
@@ -140,6 +247,52 @@
 	}
 	.small {
 		font-size: 12.5px;
+		line-height: 1.4;
+	}
+	input[type='text'],
+	input[type='number'] {
+		background: var(--bg);
+		color: var(--text);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		padding: 8px 12px;
+		font-size: 14px;
+		font-family: inherit;
+		max-width: 520px;
+		box-sizing: border-box;
+	}
+	select {
+		background: var(--bg);
+		color: var(--text);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		padding: 8px 12px;
+		font-size: 13px;
+	}
+	.viewport-row {
+		display: flex;
+		gap: 12px;
+		align-items: flex-end;
+		flex-wrap: wrap;
+	}
+	.viewport-input {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.viewport-input label {
+		font-size: 11px;
+		color: var(--muted);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+	.viewport-input input {
+		width: 110px;
+	}
+	.x {
+		font-size: 18px;
+		color: var(--muted);
+		padding-bottom: 8px;
 	}
 	.ai-block {
 		padding: 14px 18px;
@@ -150,24 +303,14 @@
 		flex-direction: column;
 		gap: 14px;
 	}
-	.ai-block input {
-		background: var(--surface);
-		color: var(--text);
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		padding: 8px 12px;
-		font-size: 14px;
-		font-family: inherit;
-		width: 100%;
-		box-sizing: border-box;
-	}
 	.actions {
 		display: flex;
 		gap: 12px;
 		align-items: center;
-		margin-top: 8px;
+		margin-top: 18px;
+		padding-top: 14px;
+		border-top: 1px solid var(--border);
 	}
-
 	.switch {
 		position: relative;
 		display: inline-block;

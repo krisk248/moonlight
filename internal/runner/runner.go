@@ -74,7 +74,9 @@ type Opts struct {
 	BaselineDir       string
 	RunsDir           string
 	Vision            *vision.Client // may be nil; consulted only if scenario needs AI
-	Headless          bool
+	Headless          bool           // default headless; scenario can override
+	DefaultViewportW  int            // applied when scenario doesn't specify viewport
+	DefaultViewportH  int
 	DiffTolerance     uint8 // 0..255 channel-delta threshold per pixel; 12 is a reasonable default
 	DefaultTimeoutMS  int   // global Playwright timeout per action; 0 → 15000
 	OnLog             func(string)
@@ -107,6 +109,7 @@ func Run(s *scenario.Scenario, mode Mode, opts Opts) (*RunResult, error) {
 	if opts.DiffTolerance == 0 {
 		opts.DiffTolerance = 12
 	}
+	headlessDefault := opts.Headless
 
 	started := time.Now().UTC()
 	stamp := started.Format("20060102-150405")
@@ -126,7 +129,7 @@ func Run(s *scenario.Scenario, mode Mode, opts Opts) (*RunResult, error) {
 
 	log(fmt.Sprintf("[start] mode=%s url=%s steps=%d ai=%v", mode, s.URL, len(s.Steps), useAI))
 
-	headless := opts.Headless
+	headless := headlessDefault
 	if s.Headless != nil {
 		headless = *s.Headless
 	}
@@ -140,9 +143,17 @@ func Run(s *scenario.Scenario, mode Mode, opts Opts) (*RunResult, error) {
 	if timeoutMS <= 0 {
 		timeoutMS = 15000
 	}
+	// Apply default viewport when the scenario didn't pin one.
+	viewport := s.Viewport
+	if viewport.Width == 0 && opts.DefaultViewportW > 0 {
+		viewport.Width = opts.DefaultViewportW
+	}
+	if viewport.Height == 0 && opts.DefaultViewportH > 0 {
+		viewport.Height = opts.DefaultViewportH
+	}
 	br, err := browser.New(browser.Opts{
 		BaseURL:          s.URL,
-		Viewport:         s.Viewport,
+		Viewport:         viewport,
 		Headless:         headless,
 		DefaultTimeoutMS: timeoutMS,
 		StorageStatePath: storageStatePath,

@@ -328,12 +328,21 @@ func (s *Server) kickoffRun(w http.ResponseWriter, r *http.Request, mode runner.
 	job := s.jobs.create(string(mode), name)
 	go func() {
 		cur := s.settings.Get()
-		slog.Info("job.start", "id", job.ID, "kind", string(mode), "scenario", name, "ai_enabled", cur.AIEnabled, "default_timeout_ms", cur.DefaultTimeoutMS)
+		slog.Info("job.start",
+			"id", job.ID, "kind", string(mode), "scenario", name,
+			"ai_enabled", cur.AIEnabled,
+			"default_timeout_ms", cur.DefaultTimeoutMS,
+			"default_viewport", fmt.Sprintf("%dx%d", cur.DefaultViewportWidth, cur.DefaultViewportHeight),
+			"default_headless", cur.DefaultHeadless,
+		)
 		opts := runner.Opts{
 			ProjectRoot:      s.cfg.ProjectRoot,
 			BaselineDir:      s.cfg.BaselineDir,
 			RunsDir:          s.cfg.RunsDir,
-			Headless:         s.cfg.Headless,
+			Headless:         cur.DefaultHeadless,
+			DefaultViewportW: cur.DefaultViewportWidth,
+			DefaultViewportH: cur.DefaultViewportHeight,
+			DiffTolerance:    uint8(cur.DefaultDiffToleranceU8),
 			DefaultTimeoutMS: cur.DefaultTimeoutMS,
 			OnLog: func(line string) {
 				s.jobs.log(job.ID, line)

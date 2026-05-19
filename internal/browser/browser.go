@@ -53,8 +53,8 @@ type Opts struct {
 }
 
 func New(opts Opts) (*Browser, error) {
-	if opts.Viewport.Width == 0 {
-		opts.Viewport = scenario.Viewport{Width: 1280, Height: 720}
+	if opts.Viewport.Width == 0 || opts.Viewport.Height == 0 {
+		opts.Viewport = scenario.Viewport{Width: 1920, Height: 1080}
 	}
 	if opts.DefaultTimeoutMS == 0 {
 		opts.DefaultTimeoutMS = 15000
